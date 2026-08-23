@@ -7,8 +7,8 @@
 # the manifest filename (main.json / canary.json), a mutable pointer at the
 # current build for that stream.
 #
-#   android/portal/<sha256>.apk   immutable, long cache
-#   android/portal/<stream>.json  mutable pointer, no-cache
+#   android/kiosk/<sha256>.apk   immutable, long cache
+#   android/kiosk/<stream>.json  mutable pointer, no-cache
 #
 # Needs `aws` on PATH (provided by the `.#ci` dev shell CI enters). Expects:
 #   R2_ENDPOINT, R2_BUCKET, PUBLIC_BASE, VERSION_CODE, VERSION_NAME, GITHUB_SHA
@@ -24,8 +24,8 @@ stream="${2:?usage: publish.sh <apk> <stream>}"
 : "${VERSION_CODE:?}" "${VERSION_NAME:?}" "${GITHUB_SHA:?}"
 
 sha256="$(sha256sum "$apk" | cut -d' ' -f1)"
-apk_key="android/portal/${sha256}.apk"
-manifest_key="android/portal/${stream}.json"
+apk_key="android/kiosk/${sha256}.apk"
+manifest_key="android/kiosk/${stream}.json"
 apk_url="${PUBLIC_BASE}/${apk_key}"
 published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 

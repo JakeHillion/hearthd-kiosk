@@ -6,21 +6,22 @@ plugins {
 }
 
 android {
-    namespace = "dev.hearthd.android.portal"
+    namespace = "dev.hearthd.android.kiosk"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "dev.hearthd.android.portal"
-        // Portal (2nd gen) ships on Android 9 (API 28).
+        applicationId = "dev.hearthd.android.kiosk"
+        // The oldest supported device (Portal 2nd gen) is on Android 9 (API 28).
         minSdk = 28
         targetSdk = 35
         // Stamped by CI from the flake's git revCount (see flake.nix). Local or
         // dirty builds fall back to these dev placeholders.
-        versionCode = (project.findProperty("portal.versionCode") as String?)?.toInt() ?: 1
-        versionName = (project.findProperty("portal.versionName") as String?) ?: "0.1.0"
+        versionCode = (project.findProperty("kiosk.versionCode") as String?)?.toInt() ?: 1
+        versionName = (project.findProperty("kiosk.versionName") as String?) ?: "0.1.0"
 
-        // ONNX Runtime ships prebuilt native libraries for every ABI. The
-        // Portal is arm64, so keep only that one and spare the APK the rest.
+        // ONNX Runtime ships prebuilt native libraries for every ABI. Every
+        // supported device is arm64, so keep only that one and spare the APK
+        // the rest.
         ndk {
             abiFilters += "arm64-v8a"
         }

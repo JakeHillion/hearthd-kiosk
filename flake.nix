@@ -1,5 +1,5 @@
 {
-  description = "hearthd-portal";
+  description = "hearthd-kiosk";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -166,8 +166,8 @@
             # mutation or --impure is needed. Only the APK build gets it; the
             # lint derivation stays version-independent.
             ++ pkgs.lib.optionals (versionCode != null) [
-              "-Pportal.versionCode=${toString versionCode}"
-              "-Pportal.versionName=${versionName}"
+              "-Pkiosk.versionCode=${toString versionCode}"
+              "-Pkiosk.versionName=${versionName}"
             ];
 
             # nixpkgs' default dependency-fetch task (nixDownloadDeps) resolves
@@ -181,8 +181,8 @@
             doCheck = false;
           });
 
-        hearthd-portal = mkGradle {
-          pname = "hearthd-portal";
+        hearthd-kiosk = mkGradle {
+          pname = "hearthd-kiosk";
           gradleBuildTask = "assembleDebug";
           # versionCode is the tip's committer time (seconds since 2020), which
           # like revCount is intrinsic to the revision — no --impure, no external
@@ -198,13 +198,13 @@
             runHook preInstall
             mkdir -p "$out"
             cp app/build/outputs/apk/debug/app-debug.apk \
-              "$out/hearthd-portal-${version}-debug.apk"
+              "$out/hearthd-kiosk-${version}-debug.apk"
             runHook postInstall
           '';
         };
 
-        hearthd-portal-lint = mkGradle {
-          pname = "hearthd-portal-lint";
+        hearthd-kiosk-lint = mkGradle {
+          pname = "hearthd-kiosk-lint";
           gradleBuildTask = "lintDebug";
           installPhase = ''
             runHook preInstall
@@ -218,22 +218,22 @@
       in
       {
         packages = {
-          default = hearthd-portal;
-          hearthd-portal = hearthd-portal;
+          default = hearthd-kiosk;
+          hearthd-kiosk = hearthd-kiosk;
         };
 
         # `nix flake check` builds the APK and runs Android Lint. The build check
         # is the same derivation as the package, so a later `nix build
-        # .#hearthd-portal` just fetches the already-built store path.
+        # .#hearthd-kiosk` just fetches the already-built store path.
         checks = {
-          build = hearthd-portal;
-          lint = hearthd-portal-lint;
+          build = hearthd-kiosk;
+          lint = hearthd-kiosk-lint;
         };
 
         # `nix run .#update-deps` regenerates deps.json after changing dependencies.
         apps.update-deps = {
           type = "app";
-          program = "${hearthd-portal.mitmCache.updateScript}";
+          program = "${hearthd-kiosk.mitmCache.updateScript}";
         };
 
         devShells.default = pkgs.mkShell {
@@ -247,8 +247,8 @@
           ANDROID_SDK_ROOT = sdkRoot;
           JAVA_HOME = "${jdk}";
           shellHook = ''
-            echo "hearthd-portal dev shell — gradle $(gradle --version | awk '/Gradle/ {print $2; exit}'), JDK 17, Android SDK ready."
-            echo "Build the APK with:  nix build .#hearthd-portal"
+            echo "hearthd-kiosk dev shell — gradle $(gradle --version | awk '/Gradle/ {print $2; exit}'), JDK 17, Android SDK ready."
+            echo "Build the APK with:  nix build .#hearthd-kiosk"
           '';
         };
 

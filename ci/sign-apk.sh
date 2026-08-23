@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Re-sign a Nix-built APK with the stable hearthd-portal release key.
+# Re-sign a Nix-built APK with the stable hearthd release key.
 #
 # The Nix build stays pure and secret-free: it emits a debug-signed APK whose
 # key is regenerated every build. Android only lets an app be updated by an APK
@@ -12,7 +12,8 @@
 #   SIGNING_KEYSTORE_BASE64    base64 of the release keystore (.jks)
 #   SIGNING_KEYSTORE_PASSWORD  keystore password
 #   SIGNING_KEY_PASSWORD       key password
-#   SIGNING_KEY_ALIAS          key alias (optional; defaults to hearthd-portal)
+#   SIGNING_KEY_ALIAS          key alias (optional; defaults to hearthd-portal, the
+#                              alias inside the existing keystore — not a brand name)
 #
 # Usage: ci/sign-apk.sh <in.apk> <out.apk>
 set -euo pipefail

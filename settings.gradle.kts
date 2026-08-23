@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "hearthd-portal"
+rootProject.name = "hearthd-kiosk"
 include(":app")

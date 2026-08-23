@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">hearthd</string>
-    <string name="welcome_message">Welcome to hearthd-portal</string>
+    <string name="welcome_message">Welcome to hearthd-kiosk</string>
     <string name="version_label">v%1$s · build %2$d</string>
-    <string name="kiosk_title">hearthd for portal</string>
+    <string name="kiosk_title">hearthd</string>
     <string name="kiosk_open_settings">⚙  Settings</string>
     <string name="settings_close">Home</string>
     <string name="settings_updates">Updates</string>
     <string name="settings_device_info">Device</string>
     <string name="device_model">Model</string>
     <string name="device_android">Android</string>
-    <string name="device_app_version">Portal version</string>
+    <string name="device_app_version">App version</string>
     <string name="device_display">Display</string>
     <string name="device_display_value">%1$d × %2$d · %3$d dpi</string>
     <string name="device_settings_summary">Opens the device\'s native Android settings — the way in to Developer options to re-enable ADB.</string>
@@ -47,6 +47,6 @@
     <string name="wake_detected">Wake word detected</string>
     <string name="settings_licenses">Open-source licenses</string>
     <string name="licenses_summary">The open-source software this app is built on.</string>
-    <string name="licenses_intro">hearthd for Portal is built on open-source software. The components below are included under their respective licenses.</string>
+    <string name="licenses_intro">hearthd-kiosk is built on open-source software. The components below are included under their respective licenses.</string>
     <string name="licenses_back">Device</string>
 </resources>

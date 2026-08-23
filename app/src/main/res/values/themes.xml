@@ -5,5 +5,5 @@
       needs to give the Activity a sane, action-bar-free window before Compose
       takes over. Uses a framework theme to avoid extra resource dependencies.
     -->
-    <style name="Theme.HearthdPortal" parent="@android:style/Theme.Material.Light.NoActionBar" />
+    <style name="Theme.HearthdKiosk" parent="@android:style/Theme.Material.Light.NoActionBar" />
 </resources>
