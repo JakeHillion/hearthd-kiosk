@@ -1,19 +1,12 @@
 package dev.hearthd.android.kiosk.dashboard
 
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import org.json.JSONObject
-import java.io.IOException
-import java.security.MessageDigest
 
 enum class DashboardStatus { IDLE, LOADING, LIVE, ERROR }
 
@@ -41,7 +34,7 @@ data class DashboardUiState(
  * verified against the requested sha256 before it's parsed.
  */
 class DashboardController {
-    private val client = OkHttpClient()
+    private val templates = TemplateClient()
     private val runLock = Mutex()
 
     private val _state = MutableStateFlow(DashboardUiState())
@@ -67,7 +60,7 @@ class DashboardController {
             _state.update { it.copy(status = DashboardStatus.LOADING) }
         }
         try {
-            val response = fetchState(stateUrl)
+            val response = templates.fetchState(stateUrl)
             val current = _state.value
             // Reuse the held template while its hash is unchanged; otherwise fetch
             // and verify the new body and swap the single slot.
@@ -75,7 +68,7 @@ class DashboardController {
                 if (response.templateHash == current.templateHash && current.template != null) {
                     current.template
                 } else {
-                    fetchTemplate(stateUrl, response.templateHash)
+                    Template.fromJson(templates.fetchTemplateJson(stateUrl, response.templateHash))
                 }
             val interval = response.refreshIntervalSeconds
                 .coerceIn(MIN_REFRESH_SECONDS, MAX_REFRESH_SECONDS)
@@ -116,51 +109,11 @@ class DashboardController {
         lastStateUrl?.let { poll(it) }
     }
 
-    private suspend fun fetchState(stateUrl: String): StateResponse = withContext(Dispatchers.IO) {
-        val request = Request.Builder().url(stateUrl).build()
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw IOException("state fetch failed: HTTP ${response.code}")
-            val body = response.body?.string() ?: throw IOException("state fetch: empty body")
-            StateResponse.fromJson(body)
-        }
-    }
-
-    private suspend fun fetchTemplate(stateUrl: String, hash: String): Template =
-        withContext(Dispatchers.IO) {
-            val request = Request.Builder().url(templateUrl(stateUrl, hash)).build()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    throw IOException("template fetch failed: HTTP ${response.code}")
-                }
-                val bytes = response.body?.bytes() ?: throw IOException("template fetch: empty body")
-                val actual = sha256Hex(bytes)
-                if (!actual.equals(hash, ignoreCase = true)) {
-                    throw IOException("template sha256 mismatch: expected $hash, got $actual")
-                }
-                Template.fromJson(String(bytes, Charsets.UTF_8))
-            }
-        }
-
     companion object {
         // Honour the server's cadence, but never poll absurdly fast or effectively never.
         private const val MIN_REFRESH_SECONDS = 2
         private const val MAX_REFRESH_SECONDS = 3600
         private const val MIN_BACKOFF_SECONDS = 5
         private const val MAX_BACKOFF_SECONDS = 60
-
-        /** Derive `…/template/<hash>` as a sibling of the configured `…/state`. */
-        internal fun templateUrl(stateUrl: String, hash: String): String {
-            val base = stateUrl.toHttpUrl()
-            return base.newBuilder()
-                .removePathSegment(base.pathSize - 1)
-                .addPathSegment("template")
-                .addPathSegment(hash)
-                .build()
-                .toString()
-        }
-
-        private fun sha256Hex(bytes: ByteArray): String =
-            MessageDigest.getInstance("SHA-256").digest(bytes)
-                .joinToString("") { "%02x".format(it) }
     }
 }

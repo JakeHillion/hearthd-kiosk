@@ -53,6 +53,9 @@ import dev.hearthd.android.kiosk.settings.Channel
 import dev.hearthd.android.kiosk.settings.DashboardSettings
 import dev.hearthd.android.kiosk.settings.HearthdSettings
 import dev.hearthd.android.kiosk.settings.INTERVAL_STOPS
+import dev.hearthd.android.kiosk.settings.ManagedSettingsController
+import dev.hearthd.android.kiosk.settings.ManagedStatus
+import dev.hearthd.android.kiosk.settings.ManagedUiState
 import dev.hearthd.android.kiosk.settings.SettingsRepository
 import dev.hearthd.android.kiosk.settings.SnapcastSettings
 import dev.hearthd.android.kiosk.snapcast.SnapcastController
@@ -75,7 +78,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlin.math.roundToInt
 
 /** Sections shown in the settings navigation rail. */
-private enum class SettingsSection { DISPLAY, AUDIO, UPDATES, ASSISTANT, DEVICE_INFO, SENSORS }
+private enum class SettingsSection { MANAGED, DISPLAY, AUDIO, UPDATES, ASSISTANT, DEVICE_INFO, SENSORS }
 
 /** Root settings screen: a navigation rail with sections. */
 @Composable
@@ -85,6 +88,7 @@ fun SettingsScreen(
     wakeWord: WakeWordDetector,
     dashboard: DashboardController,
     snapcast: SnapcastController,
+    managed: ManagedSettingsController,
     onRequestMicPermission: () -> Unit,
     onTestVoice: suspend (VoiceSettings) -> String,
     onClose: () -> Unit,
@@ -99,8 +103,15 @@ fun SettingsScreen(
     val hearthdSettings by settingsRepo.hearthd.collectAsStateWithLifecycle(initialValue = HearthdSettings())
     val snapcastSettings by settingsRepo.snapcast.collectAsStateWithLifecycle(initialValue = SnapcastSettings())
     val snapcastUi by snapcast.state.collectAsStateWithLifecycle()
+    val managedEnabled by settingsRepo.managedEnabled.collectAsStateWithLifecycle(initialValue = false)
+    val managedUi by managed.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var section by rememberSaveable { mutableStateOf(SettingsSection.DISPLAY) }
+
+    // With template control on, the other panes are template-driven and render
+    // read-only — except the dashboard State URL, which is the template's own
+    // address (see the `locked` flag threaded into each pane).
+    val locked = managedEnabled
 
     Row(modifier = Modifier.fillMaxSize()) {
         NavigationRail {
@@ -111,6 +122,12 @@ fun SettingsScreen(
                 onClick = onClose,
                 icon = { Text("←") },
                 label = { Text(stringResource(R.string.settings_close)) },
+            )
+            NavigationRailItem(
+                selected = section == SettingsSection.MANAGED,
+                onClick = { section = SettingsSection.MANAGED },
+                icon = { Text("☁") },
+                label = { Text(stringResource(R.string.settings_managed)) },
             )
             NavigationRailItem(
                 selected = section == SettingsSection.DISPLAY,
@@ -153,10 +170,18 @@ fun SettingsScreen(
             )
         }
         when (section) {
+            SettingsSection.MANAGED -> ManagedPane(
+                enabled = managedEnabled,
+                stateUrl = dashboardSettings.stateUrl,
+                ui = managedUi,
+                onEnabledChange = { scope.launch { settingsRepo.setManagedEnabled(it) } },
+                onStateUrlChange = { scope.launch { settingsRepo.setDashboardStateUrl(it) } },
+            )
             SettingsSection.DISPLAY -> DisplayPane(
                 settings = dashboardSettings,
                 ui = dashboardUi,
                 hearthdSettings = hearthdSettings,
+                locked = locked,
                 onEnabledChange = { scope.launch { settingsRepo.setDashboardEnabled(it) } },
                 onStateUrlChange = { scope.launch { settingsRepo.setDashboardStateUrl(it) } },
                 onRefreshNow = { url -> scope.launch { dashboard.poll(url) } },
@@ -166,6 +191,7 @@ fun SettingsScreen(
             SettingsSection.AUDIO -> AudioPane(
                 settings = snapcastSettings,
                 ui = snapcastUi,
+                locked = locked,
                 onEnabledChange = { scope.launch { settingsRepo.setSnapcastEnabled(it) } },
                 onHostChange = { scope.launch { settingsRepo.setSnapcastHost(it) } },
                 onPortChange = { scope.launch { settingsRepo.setSnapcastPort(it) } },
@@ -182,6 +208,7 @@ fun SettingsScreen(
                 wakeSettings = wakeSettings,
                 wakeUi = wakeUi,
                 voiceSettings = voiceSettings,
+                locked = locked,
                 onWakeEnabledChange = { scope.launch { settingsRepo.setWakeEnabled(it) } },
                 onWakeModelChange = { scope.launch { settingsRepo.setWakeModel(it) } },
                 onWakeThresholdChange = { scope.launch { settingsRepo.setWakeThreshold(it) } },
@@ -197,11 +224,86 @@ fun SettingsScreen(
     }
 }
 
+/**
+ * Template control: the switch that turns the mode on and the template's address.
+ * The address is the dashboard's `/state` URL — the one endpoint the device is
+ * pointed at, whose template carries a top-level `settings` blob. Turning the
+ * mode on makes that blob drive every other domain (those panes render read-only).
+ */
+@Composable
+private fun ManagedPane(
+    enabled: Boolean,
+    stateUrl: String,
+    ui: ManagedUiState,
+    onEnabledChange: (Boolean) -> Unit,
+    onStateUrlChange: (String) -> Unit,
+) {
+    // Local field state so typing doesn't fight DataStore round-trips; each edit
+    // is still persisted immediately. This is the same setting as the Display
+    // State URL, so mirror its persisted value when not actively editing here.
+    var url by rememberSaveable { mutableStateOf(stateUrl) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
+    ) {
+        Text(stringResource(R.string.settings_managed), style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.height(16.dp))
+
+        // Opt-in toggle.
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(stringResource(R.string.managed_enable), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    stringResource(R.string.managed_enable_summary),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Switch(checked = enabled, onCheckedChange = onEnabledChange)
+        }
+        Spacer(Modifier.height(24.dp))
+
+        // The template address = the dashboard `/state` URL. Stays editable even
+        // with the mode on: it's how the device reaches the template.
+        OutlinedTextField(
+            value = url,
+            onValueChange = { url = it; onStateUrlChange(it) },
+            label = { Text(stringResource(R.string.managed_url)) },
+            placeholder = { Text("https://home.example.com/state") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            stringResource(R.string.managed_url_summary),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Spacer(Modifier.height(20.dp))
+
+        // Live status of the poller — only meaningful once enabled.
+        if (enabled) {
+            Text(managedStatusLine(ui), style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+/** Banner shown atop every template-driven pane while template control is on. */
+@Composable
+private fun ManagedLockNotice() {
+    Text(
+        stringResource(R.string.managed_locked_notice),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.primary,
+    )
+}
+
 @Composable
 private fun DisplayPane(
     settings: DashboardSettings,
     ui: DashboardUiState,
     hearthdSettings: HearthdSettings,
+    locked: Boolean,
     onEnabledChange: (Boolean) -> Unit,
     onStateUrlChange: (String) -> Unit,
     onRefreshNow: (String) -> Unit,
@@ -209,9 +311,12 @@ private fun DisplayPane(
     onHearthdBaseUrlChange: (String) -> Unit,
 ) {
     // Local field state so typing doesn't fight DataStore round-trips; each edit
-    // is still persisted immediately.
+    // is still persisted immediately. When locked the fields are template-driven,
+    // so show the effective value from the flow rather than the stale local buffer.
     var url by rememberSaveable { mutableStateOf(settings.stateUrl) }
     var hearthdUrl by rememberSaveable { mutableStateOf(hearthdSettings.baseUrl) }
+    val shownUrl = if (locked) settings.stateUrl else url
+    val shownHearthdUrl = if (locked) hearthdSettings.baseUrl else hearthdUrl
 
     Column(
         modifier = Modifier
@@ -222,6 +327,11 @@ private fun DisplayPane(
         Text(stringResource(R.string.settings_display), style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(16.dp))
 
+        if (locked) {
+            ManagedLockNotice()
+            Spacer(Modifier.height(20.dp))
+        }
+
         // Opt-in toggle.
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.weight(1f)) {
@@ -231,18 +341,19 @@ private fun DisplayPane(
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            Switch(checked = settings.enabled, onCheckedChange = onEnabledChange)
+            Switch(checked = settings.enabled, onCheckedChange = onEnabledChange, enabled = !locked)
         }
         Spacer(Modifier.height(24.dp))
 
         // The /state endpoint. The template endpoint is derived from it, so the
         // operator only ever configures this one URL.
         OutlinedTextField(
-            value = url,
+            value = shownUrl,
             onValueChange = { url = it; onStateUrlChange(it) },
             label = { Text(stringResource(R.string.dashboard_state_url)) },
             placeholder = { Text("https://home.example.com/state") },
             singleLine = true,
+            enabled = !locked,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(20.dp))
@@ -251,7 +362,7 @@ private fun DisplayPane(
         Text(dashboardStatusLine(ui), style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(16.dp))
 
-        OutlinedButton(onClick = { onRefreshNow(url) }, enabled = url.isNotBlank()) {
+        OutlinedButton(onClick = { onRefreshNow(shownUrl) }, enabled = !locked && shownUrl.isNotBlank()) {
             Text(stringResource(R.string.dashboard_refresh_now))
         }
 
@@ -269,16 +380,17 @@ private fun DisplayPane(
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            Switch(checked = hearthdSettings.enabled, onCheckedChange = onHearthdEnabledChange)
+            Switch(checked = hearthdSettings.enabled, onCheckedChange = onHearthdEnabledChange, enabled = !locked)
         }
         Spacer(Modifier.height(24.dp))
 
         OutlinedTextField(
-            value = hearthdUrl,
+            value = shownHearthdUrl,
             onValueChange = { hearthdUrl = it; onHearthdBaseUrlChange(it) },
             label = { Text(stringResource(R.string.hearthd_base_url)) },
             placeholder = { Text("https://hearthd.example.com") },
             singleLine = true,
+            enabled = !locked,
             modifier = Modifier.fillMaxWidth(),
         )
     }
@@ -288,14 +400,18 @@ private fun DisplayPane(
 private fun AudioPane(
     settings: SnapcastSettings,
     ui: SnapcastUiState,
+    locked: Boolean,
     onEnabledChange: (Boolean) -> Unit,
     onHostChange: (String) -> Unit,
     onPortChange: (Int) -> Unit,
 ) {
     // Local field state so typing doesn't fight DataStore round-trips; each valid
-    // edit is still persisted immediately.
+    // edit is still persisted immediately. When locked the fields are
+    // template-driven, so show the effective value rather than the local buffer.
     var host by rememberSaveable { mutableStateOf(settings.host) }
     var port by rememberSaveable { mutableStateOf(settings.port.toString()) }
+    val shownHost = if (locked) settings.host else host
+    val shownPort = if (locked) settings.port.toString() else port
 
     Column(
         modifier = Modifier
@@ -306,6 +422,11 @@ private fun AudioPane(
         Text(stringResource(R.string.settings_audio), style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(16.dp))
 
+        if (locked) {
+            ManagedLockNotice()
+            Spacer(Modifier.height(20.dp))
+        }
+
         // Opt-in toggle.
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.weight(1f)) {
@@ -315,22 +436,23 @@ private fun AudioPane(
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            Switch(checked = settings.enabled, onCheckedChange = onEnabledChange)
+            Switch(checked = settings.enabled, onCheckedChange = onEnabledChange, enabled = !locked)
         }
         Spacer(Modifier.height(24.dp))
 
         // Server host + port. Nothing connects until a host is set.
         OutlinedTextField(
-            value = host,
+            value = shownHost,
             onValueChange = { host = it; onHostChange(it) },
             label = { Text(stringResource(R.string.snapcast_host)) },
             placeholder = { Text("192.168.1.10") },
             singleLine = true,
+            enabled = !locked,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(16.dp))
         OutlinedTextField(
-            value = port,
+            value = shownPort,
             onValueChange = { new ->
                 // Keep only digits; persist when it's a plausible port.
                 port = new.filter { it.isDigit() }.take(5)
@@ -339,6 +461,7 @@ private fun AudioPane(
             label = { Text(stringResource(R.string.snapcast_port)) },
             placeholder = { Text(SnapcastSettings.DEFAULT_PORT.toString()) },
             singleLine = true,
+            enabled = !locked,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(20.dp))
@@ -450,6 +573,7 @@ private fun AssistantPane(
     wakeSettings: WakeWordSettings,
     wakeUi: WakeWordUiState,
     voiceSettings: VoiceSettings,
+    locked: Boolean,
     onWakeEnabledChange: (Boolean) -> Unit,
     onWakeModelChange: (WakeWordModel) -> Unit,
     onWakeThresholdChange: (Float) -> Unit,
@@ -461,11 +585,14 @@ private fun AssistantPane(
 ) {
     val scope = rememberCoroutineScope()
     // Local field state so typing doesn't fight DataStore round-trips; each edit
-    // is still persisted immediately.
+    // is still persisted immediately. When locked the fields are template-driven,
+    // so show the effective value rather than the local buffer.
     var url by rememberSaveable { mutableStateOf(voiceSettings.baseUrl) }
     var pipeline by rememberSaveable { mutableStateOf(voiceSettings.pipelineId) }
     var testStatus by rememberSaveable { mutableStateOf<String?>(null) }
     var testing by rememberSaveable { mutableStateOf(false) }
+    val shownUrl = if (locked) voiceSettings.baseUrl else url
+    val shownPipeline = if (locked) voiceSettings.pipelineId else pipeline
 
     Column(
         modifier = Modifier
@@ -473,6 +600,11 @@ private fun AssistantPane(
             .verticalScroll(rememberScrollState())
             .padding(24.dp),
     ) {
+        if (locked) {
+            ManagedLockNotice()
+            Spacer(Modifier.height(20.dp))
+        }
+
         // ── Wake word (here to stay) ──────────────────────────────────────
         SectionHeading("🎤  ${stringResource(R.string.settings_wake_word)}")
 
@@ -484,7 +616,7 @@ private fun AssistantPane(
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            Switch(checked = wakeSettings.enabled, onCheckedChange = onWakeEnabledChange)
+            Switch(checked = wakeSettings.enabled, onCheckedChange = onWakeEnabledChange, enabled = !locked)
         }
         Spacer(Modifier.height(24.dp))
 
@@ -510,6 +642,7 @@ private fun AssistantPane(
                     selected = wakeSettings.model == model,
                     onClick = { onWakeModelChange(model) },
                     label = { Text(model.label) },
+                    enabled = !locked,
                 )
             }
         }
@@ -528,6 +661,7 @@ private fun AssistantPane(
             value = wakeSettings.threshold,
             onValueChange = onWakeThresholdChange,
             valueRange = THRESHOLD_RANGE,
+            enabled = !locked,
         )
         Spacer(Modifier.height(24.dp))
 
@@ -564,7 +698,7 @@ private fun AssistantPane(
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            Switch(checked = voiceSettings.enabled, onCheckedChange = onVoiceEnabledChange)
+            Switch(checked = voiceSettings.enabled, onCheckedChange = onVoiceEnabledChange, enabled = !locked)
         }
         if (voiceSettings.enabled && !wakeSettings.enabled) {
             Spacer(Modifier.height(8.dp))
@@ -578,19 +712,21 @@ private fun AssistantPane(
 
         // Home Assistant location.
         OutlinedTextField(
-            value = url,
+            value = shownUrl,
             onValueChange = { url = it; onBaseUrlChange(it) },
             label = { Text("Home Assistant URL") },
             placeholder = { Text("https://homeassistant.example.com") },
             singleLine = true,
+            enabled = !locked,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(16.dp))
         OutlinedTextField(
-            value = pipeline,
+            value = shownPipeline,
             onValueChange = { pipeline = it; onPipelineChange(it) },
             label = { Text("Pipeline ID (optional)") },
             singleLine = true,
+            enabled = !locked,
             modifier = Modifier.fillMaxWidth(),
         )
         Text(
@@ -604,11 +740,11 @@ private fun AssistantPane(
                 scope.launch {
                     testing = true
                     testStatus = null
-                    testStatus = onTest(voiceSettings.copy(baseUrl = url, pipelineId = pipeline))
+                    testStatus = onTest(voiceSettings.copy(baseUrl = shownUrl, pipelineId = shownPipeline))
                     testing = false
                 }
             },
-            enabled = !testing && url.isNotBlank(),
+            enabled = !locked && !testing && shownUrl.isNotBlank(),
         ) {
             Text(if (testing) "Testing…" else "Test connection")
         }
@@ -854,6 +990,19 @@ private fun dashboardStatusLine(ui: DashboardUiState): String {
         DashboardStatus.LOADING -> "Loading…"
         DashboardStatus.LIVE -> "Live · every ${ui.refreshIntervalSeconds}s"
         DashboardStatus.ERROR -> "Error: ${ui.message ?: "unknown error"}"
+    }
+    val updated = ui.lastUpdatedEpochMs?.let {
+        " · updated ${DateUtils.getRelativeTimeSpanString(it)}"
+    } ?: ""
+    return status + updated
+}
+
+private fun managedStatusLine(ui: ManagedUiState): String {
+    val status = when (ui.status) {
+        ManagedStatus.IDLE -> "Idle"
+        ManagedStatus.LOADING -> "Loading…"
+        ManagedStatus.LIVE -> "Live · every ${ui.refreshIntervalSeconds}s"
+        ManagedStatus.ERROR -> "Error: ${ui.message ?: "unknown error"}"
     }
     val updated = ui.lastUpdatedEpochMs?.let {
         " · updated ${DateUtils.getRelativeTimeSpanString(it)}"
