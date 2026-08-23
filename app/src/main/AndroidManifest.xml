@@ -18,7 +18,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.HearthdPortal">
+        android:theme="@style/Theme.HearthdKiosk">
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -29,7 +29,7 @@
             <!-- Register as a home app. Where the device allows it, this is the
                  strongest non-privileged kiosk lever: the system launches us on
                  boot, and Home returns here instead of to the stock launcher.
-                 A locked-down Portal may not let us be selected as home; the
+                 A locked-down device may not let us be selected as home; the
                  LAUNCHER filter above keeps the app reachable either way. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -48,7 +48,7 @@
              (adb shell dpm set-device-owner …), which upgrades installs from
              prompted to silent. Dormant until provisioned. -->
         <receiver
-            android:name=".update.PortalDeviceAdminReceiver"
+            android:name=".update.KioskDeviceAdminReceiver"
             android:permission="android.permission.BIND_DEVICE_ADMIN"
             android:exported="true">
             <meta-data

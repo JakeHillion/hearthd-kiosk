@@ -66,7 +66,7 @@ jobs:
 
       - name: Build & sign the release APK
         run: |
-          out=$(nix build .#hearthd-portal --no-link --print-out-paths)
+          out=$(nix build .#hearthd-kiosk --no-link --print-out-paths)
           mkdir -p artifacts
           cp "$out"/*.apk artifacts/
           chmod -R u+w artifacts
