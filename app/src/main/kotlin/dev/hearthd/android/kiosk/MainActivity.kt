@@ -119,6 +119,15 @@ class MainActivity : ComponentActivity() {
             voice.ui.collect { audioPolicy.setDucked(it.phase != VoicePhase.HIDDEN) }
         }
 
+        // Apply the stored (or template-dictated) audio settings to the policy:
+        // the assistant's loudness and how far music ducks under it.
+        lifecycleScope.launch {
+            settingsRepo.audio.collect { a ->
+                audioPolicy.setAssistantVolume(a.assistantVolume)
+                audioPolicy.setDuckLevel(a.duckPercent)
+            }
+        }
+
         // Feed the server's view of our music volume into the policy: whether it
         // holds our volume (so the server is authoritative) and what that volume is.
         lifecycleScope.launch {
@@ -270,6 +279,7 @@ class MainActivity : ComponentActivity() {
                             wakeWord = wakeWord,
                             dashboard = dashboard,
                             snapcast = snapcast,
+                            audioPolicy = audioPolicy,
                             managed = managed,
                             onRequestMicPermission = { requestMic.launch(Manifest.permission.RECORD_AUDIO) },
                             onTestVoice = ::testVoiceConnection,

@@ -72,6 +72,11 @@ class AudioPolicy(context: Context) {
     @Volatile
     private var ducked = false
 
+    // How far music drops while ducked, as a fraction (0..1). Configurable so a
+    // template can tune it; defaults until settings arrive.
+    @Volatile
+    private var duckFactor = DEFAULT_DUCK_FACTOR
+
     // The TTS player currently speaking, held so a volume key pressed mid-reply is
     // heard on the current utterance, not just the next one.
     @Volatile
@@ -184,6 +189,18 @@ class AudioPolicy(context: Context) {
         applyMusic()
     }
 
+    /** Set the assistant class's loudness (0..100), e.g. from settings/template. */
+    fun setAssistantVolume(percent: Int) {
+        _assistant.value = percent.coerceIn(0, 100)
+        applyAssistant()
+    }
+
+    /** Set how far music ducks under the assistant (0..100), e.g. from settings. */
+    fun setDuckLevel(percent: Int) {
+        duckFactor = percent.coerceIn(0, 100) / 100f
+        if (ducked) applyMusic()
+    }
+
     /** Gain (0..1) to start a TTS player at; also re-applied live while it plays. */
     fun assistantGain(): Float = _assistant.value / 100f
 
@@ -205,7 +222,7 @@ class AudioPolicy(context: Context) {
      */
     private fun applyMusic() {
         val base = if (_muted.value) 0 else localGain
-        val effective = if (ducked) (base * DUCK_FACTOR).roundToInt() else base
+        val effective = if (ducked) (base * duckFactor).roundToInt() else base
         // setStreamVolume can throw under Do Not Disturb / zen policies; a failed
         // volume nudge must never crash the kiosk.
         runCatching { audio.setStreamVolume(AudioManager.STREAM_MUSIC, percentToStream(effective), 0) }
@@ -223,10 +240,11 @@ class AudioPolicy(context: Context) {
         (percent / 100f * maxStream).roundToInt().coerceIn(0, maxStream)
 
     private companion object {
+        // Placeholder loudness until the stored/template audio settings arrive.
         const val DEFAULT_ASSISTANT = 80
         const val ASSISTANT_STEP = 10
         const val MIN_STEP = 5
-        // How far music drops while the assistant has the floor.
-        const val DUCK_FACTOR = 0.2f
+        // Placeholder duck depth until settings arrive; 0.2 = drop to a fifth.
+        const val DEFAULT_DUCK_FACTOR = 0.2f
     }
 }

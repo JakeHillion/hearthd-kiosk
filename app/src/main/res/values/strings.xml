@@ -40,7 +40,15 @@
     <string name="snapcast_enable_summary">Play synchronized multi-room audio from a Snapcast server. Off by default; nothing connects until enabled and a server is set.</string>
     <string name="snapcast_host">Server host</string>
     <string name="snapcast_port">Server port</string>
+    <string name="snapcast_control_port">Control port</string>
     <string name="snapcast_note">This integration is early and subject to change. Plain TCP only — no TLS or authentication.</string>
+    <string name="settings_volume">Volume</string>
+    <string name="volume_music_value">Music: %1$d%%</string>
+    <string name="volume_music_muted">Music: muted</string>
+    <string name="volume_music_summary">Set with the hardware keys and synced with the Snapcast server. The keys keep working on this device even when the server is unreachable.</string>
+    <string name="volume_assistant">Assistant volume: %1$d%%</string>
+    <string name="volume_duck">Duck music to: %1$d%%</string>
+    <string name="volume_duck_summary">How far music drops while the assistant is listening and replying.</string>
     <string name="settings_wake_word">Wake word</string>
     <string name="settings_assistant">Assistant</string>
     <string name="wake_enable">Wake-word detection</string>

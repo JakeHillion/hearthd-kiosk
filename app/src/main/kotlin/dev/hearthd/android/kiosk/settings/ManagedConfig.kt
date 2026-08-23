@@ -21,6 +21,7 @@ data class ManagedConfig(
     val snapcast: SnapcastSettings = SnapcastSettings(),
     val wakeWord: WakeWordSettings = WakeWordSettings(),
     val voice: VoiceSettings = VoiceSettings(),
+    val audio: AudioSettings = AudioSettings(),
 ) {
     companion object {
         /** Parse the template's `settings` object; every field is optional. */
@@ -55,6 +56,12 @@ data class ManagedConfig(
                     pipelineId = v.optString("pipeline_id", ""),
                 )
             } ?: VoiceSettings(),
+            audio = obj.optJSONObject("audio")?.let { a ->
+                AudioSettings(
+                    assistantVolume = a.optInt("assistant_volume", AudioSettings.DEFAULT_ASSISTANT_VOLUME),
+                    duckPercent = a.optInt("duck_percent", AudioSettings.DEFAULT_DUCK_PERCENT),
+                )
+            } ?: AudioSettings(),
         )
     }
 }

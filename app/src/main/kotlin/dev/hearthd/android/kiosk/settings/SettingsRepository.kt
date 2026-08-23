@@ -36,6 +36,8 @@ class SettingsRepository(private val context: Context) {
         val snapcastHost = stringPreferencesKey("snapcast_host")
         val snapcastPort = intPreferencesKey("snapcast_port")
         val snapcastControlPort = intPreferencesKey("snapcast_control_port")
+        val audioAssistantVolume = intPreferencesKey("audio_assistant_volume")
+        val audioDuckPercent = intPreferencesKey("audio_duck_percent")
         val managedEnabled = booleanPreferencesKey("managed_enabled")
         val managedCache = stringPreferencesKey("managed_cache")
     }
@@ -158,6 +160,20 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setSnapcastControlPort(port: Int) =
         context.dataStore.edit { it[Keys.snapcastControlPort] = port }
+
+    val audio: Flow<AudioSettings> = context.dataStore.data.map { prefs ->
+        val local = AudioSettings(
+            assistantVolume = prefs[Keys.audioAssistantVolume] ?: AudioSettings.DEFAULT_ASSISTANT_VOLUME,
+            duckPercent = prefs[Keys.audioDuckPercent] ?: AudioSettings.DEFAULT_DUCK_PERCENT,
+        )
+        managedOverlay(prefs)?.audio ?: local
+    }
+
+    suspend fun setAudioAssistantVolume(percent: Int) =
+        context.dataStore.edit { it[Keys.audioAssistantVolume] = percent.coerceIn(0, 100) }
+
+    suspend fun setAudioDuckPercent(percent: Int) =
+        context.dataStore.edit { it[Keys.audioDuckPercent] = percent.coerceIn(0, 100) }
 
     /** Whether the device trusts its dashboard template for the managed settings. */
     val managedEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->

@@ -46,9 +46,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.hearthd.android.kiosk.BuildConfig
 import dev.hearthd.android.kiosk.R
+import dev.hearthd.android.kiosk.audio.AudioPolicy
 import dev.hearthd.android.kiosk.dashboard.DashboardController
 import dev.hearthd.android.kiosk.dashboard.DashboardStatus
 import dev.hearthd.android.kiosk.dashboard.DashboardUiState
+import dev.hearthd.android.kiosk.settings.AudioSettings
 import dev.hearthd.android.kiosk.settings.Channel
 import dev.hearthd.android.kiosk.settings.DashboardSettings
 import dev.hearthd.android.kiosk.settings.HearthdSettings
@@ -88,6 +90,7 @@ fun SettingsScreen(
     wakeWord: WakeWordDetector,
     dashboard: DashboardController,
     snapcast: SnapcastController,
+    audioPolicy: AudioPolicy,
     managed: ManagedSettingsController,
     onRequestMicPermission: () -> Unit,
     onTestVoice: suspend (VoiceSettings) -> String,
@@ -103,6 +106,9 @@ fun SettingsScreen(
     val hearthdSettings by settingsRepo.hearthd.collectAsStateWithLifecycle(initialValue = HearthdSettings())
     val snapcastSettings by settingsRepo.snapcast.collectAsStateWithLifecycle(initialValue = SnapcastSettings())
     val snapcastUi by snapcast.state.collectAsStateWithLifecycle()
+    val audioSettings by settingsRepo.audio.collectAsStateWithLifecycle(initialValue = AudioSettings())
+    val musicVolume by audioPolicy.music.collectAsStateWithLifecycle()
+    val musicMuted by audioPolicy.muted.collectAsStateWithLifecycle()
     val managedEnabled by settingsRepo.managedEnabled.collectAsStateWithLifecycle(initialValue = false)
     val managedUi by managed.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -191,10 +197,16 @@ fun SettingsScreen(
             SettingsSection.AUDIO -> AudioPane(
                 settings = snapcastSettings,
                 ui = snapcastUi,
+                audio = audioSettings,
+                musicVolume = musicVolume,
+                musicMuted = musicMuted,
                 locked = locked,
                 onEnabledChange = { scope.launch { settingsRepo.setSnapcastEnabled(it) } },
                 onHostChange = { scope.launch { settingsRepo.setSnapcastHost(it) } },
                 onPortChange = { scope.launch { settingsRepo.setSnapcastPort(it) } },
+                onControlPortChange = { scope.launch { settingsRepo.setSnapcastControlPort(it) } },
+                onAssistantVolumeChange = { scope.launch { settingsRepo.setAudioAssistantVolume(it) } },
+                onDuckPercentChange = { scope.launch { settingsRepo.setAudioDuckPercent(it) } },
             )
             SettingsSection.UPDATES -> UpdatesPane(
                 settings = settings,
@@ -400,18 +412,26 @@ private fun DisplayPane(
 private fun AudioPane(
     settings: SnapcastSettings,
     ui: SnapcastUiState,
+    audio: AudioSettings,
+    musicVolume: Int,
+    musicMuted: Boolean,
     locked: Boolean,
     onEnabledChange: (Boolean) -> Unit,
     onHostChange: (String) -> Unit,
     onPortChange: (Int) -> Unit,
+    onControlPortChange: (Int) -> Unit,
+    onAssistantVolumeChange: (Int) -> Unit,
+    onDuckPercentChange: (Int) -> Unit,
 ) {
     // Local field state so typing doesn't fight DataStore round-trips; each valid
     // edit is still persisted immediately. When locked the fields are
     // template-driven, so show the effective value rather than the local buffer.
     var host by rememberSaveable { mutableStateOf(settings.host) }
     var port by rememberSaveable { mutableStateOf(settings.port.toString()) }
+    var controlPort by rememberSaveable { mutableStateOf(settings.controlPort.toString()) }
     val shownHost = if (locked) settings.host else host
     val shownPort = if (locked) settings.port.toString() else port
+    val shownControlPort = if (locked) settings.controlPort.toString() else controlPort
 
     Column(
         modifier = Modifier
@@ -464,6 +484,19 @@ private fun AudioPane(
             enabled = !locked,
             modifier = Modifier.fillMaxWidth(),
         )
+        Spacer(Modifier.height(16.dp))
+        OutlinedTextField(
+            value = shownControlPort,
+            onValueChange = { new ->
+                controlPort = new.filter { it.isDigit() }.take(5)
+                controlPort.toIntOrNull()?.let { if (it in 1..65535) onControlPortChange(it) }
+            },
+            label = { Text(stringResource(R.string.snapcast_control_port)) },
+            placeholder = { Text(SnapcastSettings.DEFAULT_CONTROL_PORT.toString()) },
+            singleLine = true,
+            enabled = !locked,
+            modifier = Modifier.fillMaxWidth(),
+        )
         Spacer(Modifier.height(20.dp))
 
         // Live status of the client subprocess.
@@ -476,6 +509,51 @@ private fun AudioPane(
         Text(
             stringResource(R.string.snapcast_note),
             style = MaterialTheme.typography.bodySmall,
+        )
+
+        // ── Volume ────────────────────────────────────────────────────────
+        // Music volume is live (server- or key-driven), shown read-only here; the
+        // assistant's loudness and the duck depth are the stored/template settings.
+        Spacer(Modifier.height(40.dp))
+        SectionHeading(stringResource(R.string.settings_volume))
+
+        val musicLine = if (musicMuted) {
+            stringResource(R.string.volume_music_muted)
+        } else {
+            stringResource(R.string.volume_music_value, musicVolume)
+        }
+        Text(musicLine, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            stringResource(R.string.volume_music_summary),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Spacer(Modifier.height(24.dp))
+
+        Text(
+            stringResource(R.string.volume_assistant, audio.assistantVolume),
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Slider(
+            value = audio.assistantVolume.toFloat(),
+            onValueChange = { onAssistantVolumeChange(it.roundToInt()) },
+            valueRange = 0f..100f,
+            enabled = !locked,
+        )
+        Spacer(Modifier.height(16.dp))
+
+        Text(
+            stringResource(R.string.volume_duck, audio.duckPercent),
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            stringResource(R.string.volume_duck_summary),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Slider(
+            value = audio.duckPercent.toFloat(),
+            onValueChange = { onDuckPercentChange(it.roundToInt()) },
+            valueRange = 0f..100f,
+            enabled = !locked,
         )
     }
 }
