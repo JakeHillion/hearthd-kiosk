@@ -36,6 +36,7 @@ data class ManagedConfig(
                     enabled = s.optBoolean("enabled", false),
                     host = s.optString("host", ""),
                     port = s.optInt("port", SnapcastSettings.DEFAULT_PORT),
+                    controlPort = s.optInt("control_port", SnapcastSettings.DEFAULT_CONTROL_PORT),
                 )
             } ?: SnapcastSettings(),
             wakeWord = obj.optJSONObject("wake_word")?.let { w ->

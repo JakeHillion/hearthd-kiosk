@@ -67,10 +67,7 @@ class SnapcastController(private val context: Context) {
         }
 
         // A stable id so the server recognises this client across reconnects.
-        // hostID defaults to a MAC address, which Android no longer exposes.
-        @Suppress("HardwareIds")
-        val hostId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
-            ?: "hearthd-kiosk"
+        val hostId = hostId(context)
 
         val process = withContext(Dispatchers.IO) {
             ProcessBuilder(
@@ -108,9 +105,20 @@ class SnapcastController(private val context: Context) {
         }
     }
 
-    private companion object {
+    companion object {
         // The APK ships the snapclient executable under this jniLibs name (the
         // trick Android uses to run a native binary from an app).
-        const val LIB_NAME = "libsnapclient.so"
+        private const val LIB_NAME = "libsnapclient.so"
+
+        /**
+         * The client id this device reports to snapserver, stable across
+         * reconnects. hostID defaults to a MAC address, which Android no longer
+         * exposes, so we use ANDROID_ID. The control channel keys volume commands
+         * by this same id, so it must be derived identically.
+         */
+        @Suppress("HardwareIds")
+        fun hostId(context: Context): String =
+            Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+                ?: "hearthd-kiosk"
     }
 }

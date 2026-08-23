@@ -28,6 +28,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import dev.hearthd.android.kiosk.audio.AudioClass
 import dev.hearthd.android.kiosk.audio.AudioPolicy
+import dev.hearthd.android.kiosk.audio.SnapcastControl
 import dev.hearthd.android.kiosk.dashboard.DashboardController
 import dev.hearthd.android.kiosk.dashboard.LightController
 import dev.hearthd.android.kiosk.dashboard.LocalLightCommander
@@ -91,6 +92,10 @@ class MainActivity : ComponentActivity() {
         voice = VoiceController(lifecycleScope)
         val dashboard = DashboardController()
         val snapcast = SnapcastController(applicationContext)
+        // Two-way music volume sync with the snapserver. The policy pushes local
+        // key presses through it and adopts the volume it reports back.
+        val snapcastControl = SnapcastControl(applicationContext)
+        audioPolicy.attachMusicSink(snapcastControl)
         // Template control: polls a remote template and persists its `settings`
         // blob, which SettingsRepository overlays over the local domains.
         val managed = ManagedSettingsController(
@@ -112,6 +117,17 @@ class MainActivity : ComponentActivity() {
         // clearly. The popup is hidden exactly when no turn is running.
         lifecycleScope.launch {
             voice.ui.collect { audioPolicy.setDucked(it.phase != VoicePhase.HIDDEN) }
+        }
+
+        // Feed the server's view of our music volume into the policy: whether it
+        // holds our volume (so the server is authoritative) and what that volume is.
+        lifecycleScope.launch {
+            snapcastControl.connected.collect { audioPolicy.onRemoteConnected(it) }
+        }
+        lifecycleScope.launch {
+            snapcastControl.remoteVolume.collect { v ->
+                if (v != null) audioPolicy.onRemoteVolume(v.percent, v.muted)
+            }
         }
 
         // The update loop lives here, scoped to the foreground: it only runs
@@ -202,6 +218,21 @@ class MainActivity : ComponentActivity() {
                         return@collectLatest
                     }
                     snapcast.run(s)
+                }
+            }
+        }
+
+        // The Snapcast control channel, on the same footing as the subprocess: it
+        // opens the control socket only while Snapcast is enabled and configured,
+        // and reconnects on its own. Off, the policy runs on the local volume lever.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                settingsRepo.snapcast.collectLatest { s ->
+                    if (!s.enabled || !s.configured) {
+                        snapcastControl.markDisabled()
+                        return@collectLatest
+                    }
+                    snapcastControl.run(s)
                 }
             }
         }

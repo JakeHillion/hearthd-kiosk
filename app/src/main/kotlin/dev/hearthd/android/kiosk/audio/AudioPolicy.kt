@@ -16,6 +16,16 @@ import kotlin.math.roundToInt
 enum class AudioClass { MUSIC, ASSISTANT }
 
 /**
+ * A best-effort channel for telling the Snapcast server this device's music
+ * volume, so a local key press shows up in Snapweb and the other rooms' notion of
+ * this client. Deliberately fire-and-forget: it must never block a key press, and
+ * when it can't get through the local STREAM_MUSIC lever still changes the output.
+ */
+interface MusicVolumeSink {
+    fun push(percent: Int, muted: Boolean)
+}
+
+/**
  * The device's single audio authority. Android mixes every output at once, so
  * without one place deciding who is loud the Snapcast music and the assistant's
  * speech just pile on top of each other, and the volume keys land wherever the
@@ -29,11 +39,13 @@ enum class AudioClass { MUSIC, ASSISTANT }
  * Music is *ducked* — quietened, not paused — while a voice turn is on screen, so
  * a command can be heard over whatever's playing and the reply lands clearly.
  *
- * This first cut is entirely local: music volume is the device's STREAM_MUSIC
- * level, which is always adjustable with no network in the loop — the property we
- * lean on so the keys can always silence the device. A later change puts the
- * Snapcast server in charge of the music level, keeping this local lever
- * underneath as the guaranteed fallback.
+ * Music volume is server-authoritative: when the Snapcast control channel is
+ * connected the server holds the level (and Snapweb and the other rooms see it),
+ * scaling the audio in software while the local stream stays fully open. But the
+ * local STREAM_MUSIC stream is always the lever underneath, with no network in the
+ * loop — a volume-down pulls it down instantly and mute pins it to zero — so the
+ * device can always be silenced whatever the server does. When the control channel
+ * is down that local lever simply is the music level.
  */
 class AudioPolicy(context: Context) {
 
@@ -65,6 +77,25 @@ class AudioPolicy(context: Context) {
     @Volatile
     private var assistantPlayer: MediaPlayer? = null
 
+    // Best-effort link to the Snapcast server for two-way volume sync, and whether
+    // it currently holds our volume.
+    @Volatile
+    private var musicSink: MusicVolumeSink? = null
+
+    @Volatile
+    private var remoteConnected = false
+
+    // The local media-stream gain (0..100), the only thing that actually reaches
+    // the speaker after mute and duck. It is *always* the lever the keys can pull
+    // down, with no network in the loop — the guarantee that we can silence the
+    // device whatever the server does. In the steady connected state it sits at
+    // 100 and the server's software volume carries the level; a volume-down pulls
+    // it down at once for instant local effect, and it relaxes back to 100 once the
+    // server confirms the new level (so we never double-attenuate for long). While
+    // disconnected it simply is the music level.
+    @Volatile
+    private var localGain = _music.value
+
     /** Volume-up on the active [cls]. */
     fun volumeUp(cls: AudioClass) = when (cls) {
         AudioClass.MUSIC -> nudgeMusic(musicStep)
@@ -80,6 +111,7 @@ class AudioPolicy(context: Context) {
     /** Toggle the local music mute — the guaranteed local silence. */
     fun toggleMute() {
         _muted.update { !it }
+        pushMusic()
         applyMusic()
     }
 
@@ -87,8 +119,57 @@ class AudioPolicy(context: Context) {
         // Turning it up is also an "un-silence": nobody expects volume-up to do
         // nothing because a mute they forgot about is still latched.
         if (delta > 0) _muted.value = false
-        _music.update { (it + delta).coerceIn(0, 100) }
+        val level = (_music.value + delta).coerceIn(0, 100)
+        _music.value = level
+        pushMusic()
+        localGain = when {
+            // Not connected: the local gain simply is the level.
+            !remoteConnected -> level
+            // Connected volume-down: pull the local gain down now so the output
+            // drops this instant, even if the server never hears us. It relaxes
+            // back to 100 when the server confirms (see onRemoteVolume).
+            delta < 0 -> minOf(localGain, level)
+            // Connected volume-up: let the server carry the rise; opening the local
+            // gain can't overshoot because the server still holds the old, lower level.
+            else -> 100
+        }
         applyMusic()
+    }
+
+    /** Attach the server sync channel (Snapcast control), or detach with null. */
+    fun attachMusicSink(sink: MusicVolumeSink?) {
+        musicSink = sink
+    }
+
+    /**
+     * The server gained or lost our volume. On connect we don't push our own level
+     * — the server's value wins (adopted via [onRemoteVolume]), so a change made
+     * elsewhere isn't clobbered by a stale local one. On disconnect the local gain
+     * takes over at the current level, so the output doesn't jump and the keys keep
+     * working directly on the stream.
+     */
+    fun onRemoteConnected(connected: Boolean) {
+        if (remoteConnected == connected) return
+        remoteConnected = connected
+        if (!connected) localGain = _music.value
+        applyMusic()
+    }
+
+    /**
+     * Adopt a volume the server reports — its status reply, a change made in
+     * Snapweb, or the echo of our own push. The server now carries this level in
+     * software, so the local gain relaxes back to fully open; mute stays local.
+     */
+    fun onRemoteVolume(percent: Int, muted: Boolean) {
+        _music.value = percent.coerceIn(0, 100)
+        _muted.value = muted
+        localGain = 100
+        applyMusic()
+    }
+
+    /** Best-effort: tell the server this device's music volume. */
+    private fun pushMusic() {
+        musicSink?.push(_music.value, _muted.value)
     }
 
     private fun nudgeAssistant(delta: Int) {
@@ -116,9 +197,14 @@ class AudioPolicy(context: Context) {
         if (player != null) applyAssistant()
     }
 
-    /** Push the intended music level to the device's media stream. */
+    /**
+     * Push the effective gain to the device's media stream. Mute always wins and
+     * pins it to zero — the guaranteed local silence, independent of the server —
+     * then the duck, then the local gain (which carries the level when disconnected
+     * and sits at 100 when the server holds it).
+     */
     private fun applyMusic() {
-        val base = if (_muted.value) 0 else _music.value
+        val base = if (_muted.value) 0 else localGain
         val effective = if (ducked) (base * DUCK_FACTOR).roundToInt() else base
         // setStreamVolume can throw under Do Not Disturb / zen policies; a failed
         // volume nudge must never crash the kiosk.
