@@ -2,6 +2,7 @@ package dev.hearthd.android.kiosk.voice
 
 import android.media.AudioAttributes
 import android.media.MediaPlayer
+import dev.hearthd.android.kiosk.audio.AudioPolicy
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -39,6 +40,7 @@ import kotlin.coroutines.resume
 class HomeAssistantAssist(
     baseUrl: String,
     private val pipelineId: String?,
+    private val audioPolicy: AudioPolicy,
 ) : VoiceAssistant {
 
     private val base = baseUrl.trimEnd('/')
@@ -176,18 +178,29 @@ class HomeAssistantAssist(
         suspendCancellableCoroutine { cont: CancellableContinuation<Unit> ->
             val player = MediaPlayer().apply {
                 setAudioAttributes(
+                    // USAGE_ASSISTANT maps to STREAM_MUSIC — the very stream we duck
+                    // for music — so the reply would be ducked along with it. Accessibility
+                    // spoken output is a genuinely separate stream, so the duck leaves the
+                    // assistant untouched and the policy's per-player gain is its own control.
                     AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build(),
                 )
-                setOnPreparedListener { start() }
-                setOnCompletionListener { resumeOnce(cont); release() }
-                setOnErrorListener { _, _, _ -> resumeOnce(cont); release(); true }
+                // Start at the assistant class's level and let the policy hold a
+                // reference so a volume key pressed while it speaks is heard now.
+                setOnPreparedListener { mp ->
+                    audioPolicy.bindAssistantPlayer(mp)
+                    mp.start()
+                }
+                setOnCompletionListener { audioPolicy.bindAssistantPlayer(null); resumeOnce(cont); release() }
+                setOnErrorListener { _, _, _ ->
+                    audioPolicy.bindAssistantPlayer(null); resumeOnce(cont); release(); true
+                }
                 setDataSource(url)
                 prepareAsync()
             }
-            cont.invokeOnCancellation { runCatching { player.release() } }
+            cont.invokeOnCancellation { audioPolicy.bindAssistantPlayer(null); runCatching { player.release() } }
         }
     }
 
