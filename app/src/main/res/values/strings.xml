@@ -20,6 +20,12 @@
     <string name="update_channel">Channel</string>
     <string name="update_interval">Check every</string>
     <string name="update_check_now">Check now</string>
+    <string name="settings_managed">Template control</string>
+    <string name="managed_enable">Full template control</string>
+    <string name="managed_enable_summary">Read this device\'s settings from a remote template and keep them in sync. When on, every setting below is greyed out and driven by the template — only this switch and the URL stay local.</string>
+    <string name="managed_url">Template state URL</string>
+    <string name="managed_url_summary">The same /state URL as the dashboard — its template carries the settings. Shared with Display, and editable here even while template control is on.</string>
+    <string name="managed_locked_notice">Template control is on — these settings are locked. Turn it off under Template control to edit them on the device.</string>
     <string name="settings_display">Display</string>
     <string name="dashboard_enable">Dashboard</string>
     <string name="dashboard_enable_summary">Show a remote dashboard on the kiosk. Off by default; nothing is fetched until enabled and a URL is set.</string>

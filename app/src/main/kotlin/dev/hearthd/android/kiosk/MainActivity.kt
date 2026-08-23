@@ -29,6 +29,7 @@ import dev.hearthd.android.kiosk.dashboard.DashboardController
 import dev.hearthd.android.kiosk.dashboard.LightController
 import dev.hearthd.android.kiosk.dashboard.LocalLightCommander
 import dev.hearthd.android.kiosk.settings.HearthdSettings
+import dev.hearthd.android.kiosk.settings.ManagedSettingsController
 import dev.hearthd.android.kiosk.settings.SettingsRepository
 import dev.hearthd.android.kiosk.settings.VoiceSettings
 import dev.hearthd.android.kiosk.snapcast.SnapcastController
@@ -80,6 +81,11 @@ class MainActivity : ComponentActivity() {
         val voice = VoiceController(lifecycleScope)
         val dashboard = DashboardController()
         val snapcast = SnapcastController(applicationContext)
+        // Template control: polls a remote template and persists its `settings`
+        // blob, which SettingsRepository overlays over the local domains.
+        val managed = ManagedSettingsController(
+            saveConfig = { settingsRepo.setManagedCache(it) },
+        )
         // Light control (write path): commands go straight to hearthd, then nudge
         // a dashboard re-poll so the change is confirmed without waiting a cycle.
         val lightCommander = LightController(
@@ -143,6 +149,30 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // Template control: when enabled and the dashboard `/state` URL is set,
+        // poll that same URL and persist the template's `settings` blob. The
+        // dashboard URL is the address the device is pointed at, so it's the
+        // template source too — no separate URL. Same foreground-only, opt-in,
+        // collectLatest footing as the loops above; the server dictates the
+        // cadence. Off, it resets status and the persisted blob is no longer
+        // overlaid.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                combine(settingsRepo.managedEnabled, settingsRepo.dashboard) { enabled, dash ->
+                    enabled to dash.stateUrl
+                }.collectLatest { (enabled, stateUrl) ->
+                    if (!enabled || stateUrl.isBlank()) {
+                        managed.clear()
+                        return@collectLatest
+                    }
+                    while (true) {
+                        val waitSeconds = managed.poll(stateUrl)
+                        delay(waitSeconds.toLong() * 1_000L)
+                    }
+                }
+            }
+        }
+
         // Snapcast client: when enabled + configured, spawn the
         // bundled snapclient against the server. Foreground-only and opt-in like
         // the loops above — collectLatest tears the process down (releasing audio)
@@ -192,6 +222,7 @@ class MainActivity : ComponentActivity() {
                             wakeWord = wakeWord,
                             dashboard = dashboard,
                             snapcast = snapcast,
+                            managed = managed,
                             onRequestMicPermission = { requestMic.launch(Manifest.permission.RECORD_AUDIO) },
                             onTestVoice = ::testVoiceConnection,
                             onClose = { showSettings = false },

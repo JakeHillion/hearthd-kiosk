@@ -12,6 +12,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import dev.hearthd.android.kiosk.wakeword.WakeWordModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import org.json.JSONObject
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
@@ -34,6 +35,21 @@ class SettingsRepository(private val context: Context) {
         val snapcastEnabled = booleanPreferencesKey("snapcast_enabled")
         val snapcastHost = stringPreferencesKey("snapcast_host")
         val snapcastPort = intPreferencesKey("snapcast_port")
+        val managedEnabled = booleanPreferencesKey("managed_enabled")
+        val managedCache = stringPreferencesKey("managed_cache")
+    }
+
+    /**
+     * The template-dictated config to overlay, or null when template control is
+     * off. When on but nothing has been fetched (or the cache won't parse), this
+     * is a default [ManagedConfig] — a never-fetched device runs built-in
+     * defaults, never the stale local values.
+     */
+    private fun managedOverlay(prefs: Preferences): ManagedConfig? {
+        if (prefs[Keys.managedEnabled] != true) return null
+        val cached = prefs[Keys.managedCache] ?: return ManagedConfig()
+        return runCatching { ManagedConfig.fromJson(JSONObject(cached)) }
+            .getOrDefault(ManagedConfig())
     }
 
     val settings: Flow<UpdateSettings> = context.dataStore.data.map { prefs ->
@@ -46,12 +62,13 @@ class SettingsRepository(private val context: Context) {
 
     val wakeWord: Flow<WakeWordSettings> = context.dataStore.data.map { prefs ->
         val model = WakeWordModel.fromId(prefs[Keys.wakeModel])
-        WakeWordSettings(
+        val local = WakeWordSettings(
             enabled = prefs[Keys.wakeEnabled] ?: false,
             model = model,
             // Fall back to the model's tuned default until the user moves the slider.
             threshold = prefs[Keys.wakeThreshold] ?: model.defaultThreshold,
         )
+        managedOverlay(prefs)?.wakeWord ?: local
     }
 
     suspend fun setEnabled(value: Boolean) = context.dataStore.edit { it[Keys.enabled] = value }
@@ -72,11 +89,12 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { it[Keys.wakeThreshold] = threshold }
 
     val voice: Flow<VoiceSettings> = context.dataStore.data.map { prefs ->
-        VoiceSettings(
+        val local = VoiceSettings(
             enabled = prefs[Keys.voiceEnabled] ?: false,
             baseUrl = prefs[Keys.voiceBaseUrl] ?: "",
             pipelineId = prefs[Keys.voicePipeline] ?: "",
         )
+        managedOverlay(prefs)?.voice ?: local
     }
 
     suspend fun setVoiceEnabled(value: Boolean) =
@@ -88,6 +106,9 @@ class SettingsRepository(private val context: Context) {
     suspend fun setVoicePipeline(id: String) =
         context.dataStore.edit { it[Keys.voicePipeline] = id.trim() }
 
+    // Dashboard stays local even under template control: its `/state` URL is the
+    // address the device is pointed at to reach the template, so it can't be
+    // dictated by that template.
     val dashboard: Flow<DashboardSettings> = context.dataStore.data.map { prefs ->
         DashboardSettings(
             enabled = prefs[Keys.dashboardEnabled] ?: false,
@@ -102,10 +123,11 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { it[Keys.dashboardStateUrl] = url.trim() }
 
     val hearthd: Flow<HearthdSettings> = context.dataStore.data.map { prefs ->
-        HearthdSettings(
+        val local = HearthdSettings(
             enabled = prefs[Keys.hearthdEnabled] ?: false,
             baseUrl = prefs[Keys.hearthdBaseUrl] ?: "",
         )
+        managedOverlay(prefs)?.hearthd ?: local
     }
 
     suspend fun setHearthdEnabled(value: Boolean) =
@@ -115,11 +137,12 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { it[Keys.hearthdBaseUrl] = url.trim() }
 
     val snapcast: Flow<SnapcastSettings> = context.dataStore.data.map { prefs ->
-        SnapcastSettings(
+        val local = SnapcastSettings(
             enabled = prefs[Keys.snapcastEnabled] ?: false,
             host = prefs[Keys.snapcastHost] ?: "",
             port = prefs[Keys.snapcastPort] ?: SnapcastSettings.DEFAULT_PORT,
         )
+        managedOverlay(prefs)?.snapcast ?: local
     }
 
     suspend fun setSnapcastEnabled(value: Boolean) =
@@ -130,4 +153,16 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setSnapcastPort(port: Int) =
         context.dataStore.edit { it[Keys.snapcastPort] = port }
+
+    /** Whether the device trusts its dashboard template for the managed settings. */
+    val managedEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.managedEnabled] ?: false
+    }
+
+    suspend fun setManagedEnabled(value: Boolean) =
+        context.dataStore.edit { it[Keys.managedEnabled] = value }
+
+    /** Persist the last-good template `settings` blob (raw JSON) for the overlay. */
+    suspend fun setManagedCache(json: String) =
+        context.dataStore.edit { it[Keys.managedCache] = json }
 }
