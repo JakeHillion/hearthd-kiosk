@@ -28,3 +28,6 @@ app/src/main/jniLibs/
 .idea/
 *.iml
 .kotlin/
+
+# direnv
+/.direnv/
