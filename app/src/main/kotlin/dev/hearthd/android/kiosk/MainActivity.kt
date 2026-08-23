@@ -3,6 +3,7 @@ package dev.hearthd.android.kiosk
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -25,6 +26,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import dev.hearthd.android.kiosk.audio.AudioClass
+import dev.hearthd.android.kiosk.audio.AudioPolicy
 import dev.hearthd.android.kiosk.dashboard.DashboardController
 import dev.hearthd.android.kiosk.dashboard.LightController
 import dev.hearthd.android.kiosk.dashboard.LocalLightCommander
@@ -41,6 +44,7 @@ import dev.hearthd.android.kiosk.update.UpdateController
 import dev.hearthd.android.kiosk.voice.HomeAssistantAssist
 import dev.hearthd.android.kiosk.voice.HomeAssistantAuth
 import dev.hearthd.android.kiosk.voice.VoiceController
+import dev.hearthd.android.kiosk.voice.VoicePhase
 import dev.hearthd.android.kiosk.wakeword.WakeWordDetector
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -65,6 +69,11 @@ class MainActivity : ComponentActivity() {
     @Volatile
     private var hearthdSettings = HearthdSettings()
 
+    // The audio authority and the voice controller are held as fields because the
+    // hardware volume keys arrive in dispatchKeyEvent, outside onCreate's scope.
+    private lateinit var audioPolicy: AudioPolicy
+    private lateinit var voice: VoiceController
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -78,7 +87,8 @@ class MainActivity : ComponentActivity() {
         val settingsRepo = SettingsRepository(applicationContext)
         val controller = UpdateController(applicationContext)
         val wakeWord = WakeWordDetector(applicationContext)
-        val voice = VoiceController(lifecycleScope)
+        audioPolicy = AudioPolicy(applicationContext)
+        voice = VoiceController(lifecycleScope)
         val dashboard = DashboardController()
         val snapcast = SnapcastController(applicationContext)
         // Template control: polls a remote template and persists its `settings`
@@ -95,6 +105,13 @@ class MainActivity : ComponentActivity() {
         )
         lifecycleScope.launch {
             settingsRepo.hearthd.collect { hearthdSettings = it }
+        }
+
+        // Duck music whenever a voice turn is on screen (listening through reply),
+        // so the command is heard over whatever's playing and the response lands
+        // clearly. The popup is hidden exactly when no turn is running.
+        lifecycleScope.launch {
+            voice.ui.collect { audioPolicy.setDucked(it.phase != VoicePhase.HIDDEN) }
         }
 
         // The update loop lives here, scoped to the foreground: it only runs
@@ -196,7 +213,7 @@ class MainActivity : ComponentActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 settingsRepo.voice.collectLatest { v ->
                     if (!v.enabled || !v.configured) return@collectLatest
-                    val assistant = HomeAssistantAssist(v.baseUrl, v.pipelineId)
+                    val assistant = HomeAssistantAssist(v.baseUrl, v.pipelineId, audioPolicy)
                     wakeWord.events.collect {
                         voice.startTurn(assistant, wakeWord.audioFrames)
                     }
@@ -250,6 +267,33 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // The permission may have changed while we were away (dialog, settings).
         micPermission.value = hasMicPermission()
+    }
+
+    /**
+     * The hardware volume keys belong to us, not the OS. We route them to the
+     * active audio class — the assistant while a turn is on screen, music
+     * otherwise — and consume them so the system volume panel never appears over
+     * the kiosk. Consuming the key-up too keeps the panel from flashing on release.
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_VOLUME_MUTE -> {
+                if (event.action == KeyEvent.ACTION_DOWN && ::audioPolicy.isInitialized) {
+                    val cls = if (voice.ui.value.phase != VoicePhase.HIDDEN) {
+                        AudioClass.ASSISTANT
+                    } else {
+                        AudioClass.MUSIC
+                    }
+                    when (event.keyCode) {
+                        KeyEvent.KEYCODE_VOLUME_UP -> audioPolicy.volumeUp(cls)
+                        KeyEvent.KEYCODE_VOLUME_DOWN -> audioPolicy.volumeDown(cls)
+                        else -> audioPolicy.toggleMute()
+                    }
+                }
+                return true
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
