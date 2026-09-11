@@ -58,7 +58,10 @@ import dev.hearthd.android.kiosk.settings.ManagedStatus
 import dev.hearthd.android.kiosk.settings.ManagedUiState
 import dev.hearthd.android.kiosk.settings.SettingsRepository
 import dev.hearthd.android.kiosk.settings.SnapcastSettings
+import dev.hearthd.android.kiosk.snapcast.NowPlayingStatus
 import dev.hearthd.android.kiosk.snapcast.SnapcastController
+import dev.hearthd.android.kiosk.snapcast.SnapcastNowPlaying
+import dev.hearthd.android.kiosk.snapcast.SnapcastNowPlayingUiState
 import dev.hearthd.android.kiosk.snapcast.SnapcastStatus
 import dev.hearthd.android.kiosk.snapcast.SnapcastUiState
 import dev.hearthd.android.kiosk.snapcast.SnapcastVolumeSync
@@ -92,6 +95,7 @@ fun SettingsScreen(
     dashboard: DashboardController,
     snapcast: SnapcastController,
     volumeSync: SnapcastVolumeSync,
+    nowPlaying: SnapcastNowPlaying,
     managed: ManagedSettingsController,
     onRequestMicPermission: () -> Unit,
     onTestVoice: suspend (VoiceSettings) -> String,
@@ -108,6 +112,9 @@ fun SettingsScreen(
     val snapcastSettings by settingsRepo.snapcast.collectAsStateWithLifecycle(initialValue = SnapcastSettings())
     val snapcastUi by snapcast.state.collectAsStateWithLifecycle()
     val volumeSyncUi by volumeSync.state.collectAsStateWithLifecycle()
+    // Watching this is itself what brings the metadata link up — it runs for
+    // whoever is looking, and while this pane is open that's us.
+    val nowPlayingUi by nowPlaying.state.collectAsStateWithLifecycle()
     val managedEnabled by settingsRepo.managedEnabled.collectAsStateWithLifecycle(initialValue = false)
     val managedUi by managed.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -197,6 +204,7 @@ fun SettingsScreen(
                 settings = snapcastSettings,
                 ui = snapcastUi,
                 sync = volumeSyncUi,
+                nowPlaying = nowPlayingUi,
                 locked = locked,
                 onEnabledChange = { scope.launch { settingsRepo.setSnapcastEnabled(it) } },
                 onHostChange = { scope.launch { settingsRepo.setSnapcastHost(it) } },
@@ -409,6 +417,7 @@ private fun AudioPane(
     settings: SnapcastSettings,
     ui: SnapcastUiState,
     sync: VolumeSyncUiState,
+    nowPlaying: SnapcastNowPlayingUiState,
     locked: Boolean,
     onEnabledChange: (Boolean) -> Unit,
     onHostChange: (String) -> Unit,
@@ -521,6 +530,14 @@ private fun AudioPane(
             Spacer(Modifier.height(8.dp))
             Text(it, style = MaterialTheme.typography.bodySmall)
         }
+        Spacer(Modifier.height(24.dp))
+
+        // What the server says is playing on this device's stream. Read-only and
+        // always available, so it has no switch of its own: it runs whenever
+        // something is looking at it.
+        Text(stringResource(R.string.snapcast_now_playing), style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(8.dp))
+        Text(nowPlayingStatusLine(nowPlaying), style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(16.dp))
         Text(
             stringResource(R.string.snapcast_note),
@@ -1064,6 +1081,20 @@ private fun snapcastStatusLine(ui: SnapcastUiState): String = when (ui.status) {
     SnapcastStatus.STARTING -> "Starting… (${ui.server})"
     SnapcastStatus.RUNNING -> "Playing from ${ui.server}"
     SnapcastStatus.ERROR -> "Error: ${ui.message ?: "unknown error"}"
+}
+
+private fun nowPlayingStatusLine(ui: SnapcastNowPlayingUiState): String = when (ui.status) {
+    NowPlayingStatus.IDLE -> "Not running"
+    NowPlayingStatus.CONNECTING -> "Connecting… (${ui.server})"
+    NowPlayingStatus.ERROR -> "Error: ${ui.message ?: "unknown error"}"
+    NowPlayingStatus.LIVE -> {
+        val stream = ui.streamId?.let { "stream \"$it\"" } ?: "no stream"
+        val track = ui.nowPlaying?.let { np ->
+            listOfNotNull(np.title, np.artist, np.album).joinToString(" — ")
+                .ifBlank { "an untitled track" }
+        }
+        if (track != null) "Playing on $stream: $track" else "Nothing playing on $stream"
+    }
 }
 
 private fun volumeSyncStatusLine(ui: VolumeSyncUiState): String = when (ui.status) {

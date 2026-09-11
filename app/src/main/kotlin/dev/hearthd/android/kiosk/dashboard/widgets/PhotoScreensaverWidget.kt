@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -21,10 +24,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import dev.hearthd.android.kiosk.dashboard.Binding
@@ -33,6 +40,8 @@ import dev.hearthd.android.kiosk.dashboard.Widget
 import dev.hearthd.android.kiosk.dashboard.parseWidget
 import dev.hearthd.android.kiosk.dashboard.resolveObject
 import dev.hearthd.android.kiosk.dashboard.resolveString
+import dev.hearthd.android.kiosk.nowplaying.LocalNowPlaying
+import dev.hearthd.android.kiosk.nowplaying.NowPlaying
 import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
@@ -62,6 +71,11 @@ import kotlin.math.roundToInt
  * id, and [sun] a `{elevation, azimuth}` object (degrees). The overlay's layout
  * and formatting are fixed. With no photos configured it falls back to the
  * overlay on black, still dimming the dashboard while idle.
+ *
+ * What's playing sits opposite the clock, bottom-right, and comes from the
+ * device rather than from state — Snapcast today, via `LocalNowPlaying`. It's on
+ * unless [showNowPlaying] turns it off, and shows nothing at all when nothing is
+ * playing, so a silent house is just the photo.
  */
 data class PhotoScreensaverWidget(
     val child: Widget,
@@ -70,25 +84,35 @@ data class PhotoScreensaverWidget(
     val weather: Binding,
     val sun: Binding,
     val mode: String,
+    val showNowPlaying: Boolean,
     val dwellSeconds: Long,
     val rotateSeconds: Long,
     val rolloverHour: Int,
 ) : Widget {
     @Composable
     override fun Render(state: JSONObject, modifier: Modifier) {
+        // Watch from here rather than inside the frame: the frame exists only
+        // while the saver is showing, so subscribing there would drop the
+        // source's link on every touch and reconnect it after the dwell.
+        val nowPlaying = if (showNowPlaying) {
+            LocalNowPlaying.current.collectAsStateWithLifecycle().value
+        } else {
+            null
+        }
+
         ScreensaverScaffold(
             // The photo frame is the resting state, so it's always armed; the
             // scaffold shows it whenever the surface is idle.
             armed = true,
             dwellMillis = dwellSeconds * 1_000L,
-            saver = { PhotoFrame(state) },
+            saver = { PhotoFrame(state, nowPlaying) },
             child = { child.Render(state, Modifier.fillMaxSize()) },
             modifier = modifier.fillMaxSize(),
         )
     }
 
     @Composable
-    private fun PhotoFrame(state: JSONObject) {
+    private fun PhotoFrame(state: JSONObject, nowPlaying: NowPlaying?) {
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
             if (mode == MODE_SOLAR) SolarLayer(state) else SlideshowLayer(state)
 
@@ -106,6 +130,12 @@ data class PhotoScreensaverWidget(
             )
 
             Overlay(state)
+            nowPlaying?.let {
+                NowPlayingOverlay(
+                    it,
+                    Modifier.align(Alignment.BottomEnd).padding(32.dp),
+                )
+            }
         }
     }
 
@@ -275,6 +305,7 @@ data class PhotoScreensaverWidget(
             weather = Binding.of(obj.opt("weather")),
             sun = Binding.of(obj.opt("sun")),
             mode = obj.optString("mode").ifBlank { "slideshow" },
+            showNowPlaying = obj.optBoolean("show_now_playing", true),
             dwellSeconds = obj.optLong("dwell_seconds", 20L).coerceAtLeast(1L),
             rotateSeconds = obj.optLong("rotate_seconds", 30L).coerceAtLeast(1L),
             rolloverHour = obj.optInt("rollover_hour", 4).coerceIn(0, 23),
@@ -283,6 +314,58 @@ data class PhotoScreensaverWidget(
 }
 
 private const val PHOTO_FADE_MILLIS = 1_000
+private val NOW_PLAYING_ART_SIZE = 72.dp
+private val NOW_PLAYING_TEXT_WIDTH = 280.dp
+
+/**
+ * What's playing, opposite the clock. The text is right-aligned and the cover
+ * hugs the corner, so the block reads outward from the frame the way the date
+ * and weather do on the other side. The text is bounded and clipped to one line
+ * each: a long title must not run back across the photo into the clock.
+ */
+@Composable
+private fun NowPlayingOverlay(nowPlaying: NowPlaying, modifier: Modifier = Modifier) {
+    val subtitle = listOfNotNull(nowPlaying.artist, nowPlaying.album).joinToString(" · ")
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Column(
+            horizontalAlignment = Alignment.End,
+            modifier = Modifier.widthIn(max = NOW_PLAYING_TEXT_WIDTH),
+        ) {
+            nowPlaying.title?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
+                    textAlign = TextAlign.End,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (subtitle.isNotBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.75f),
+                    textAlign = TextAlign.End,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        nowPlaying.artUri?.let {
+            AsyncImage(
+                model = it,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.size(NOW_PLAYING_ART_SIZE).clip(RoundedCornerShape(8.dp)),
+            )
+        }
+    }
+}
 
 /** Placeholder icon: map a condition string to an emoji until real icons land. */
 private fun conditionGlyph(condition: String): String = when (condition.lowercase()) {
