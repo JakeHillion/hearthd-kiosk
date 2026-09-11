@@ -35,6 +35,8 @@ class SettingsRepository(private val context: Context) {
         val snapcastEnabled = booleanPreferencesKey("snapcast_enabled")
         val snapcastHost = stringPreferencesKey("snapcast_host")
         val snapcastPort = intPreferencesKey("snapcast_port")
+        val snapcastVolumeSync = booleanPreferencesKey("snapcast_volume_sync")
+        val snapcastControlPort = intPreferencesKey("snapcast_control_port")
         val managedEnabled = booleanPreferencesKey("managed_enabled")
         val managedCache = stringPreferencesKey("managed_cache")
     }
@@ -141,6 +143,8 @@ class SettingsRepository(private val context: Context) {
             enabled = prefs[Keys.snapcastEnabled] ?: false,
             host = prefs[Keys.snapcastHost] ?: "",
             port = prefs[Keys.snapcastPort] ?: SnapcastSettings.DEFAULT_PORT,
+            volumeSync = prefs[Keys.snapcastVolumeSync] ?: false,
+            controlPort = prefs[Keys.snapcastControlPort] ?: SnapcastSettings.DEFAULT_CONTROL_PORT,
         )
         managedOverlay(prefs)?.snapcast ?: local
     }
@@ -153,6 +157,12 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setSnapcastPort(port: Int) =
         context.dataStore.edit { it[Keys.snapcastPort] = port }
+
+    suspend fun setSnapcastVolumeSync(value: Boolean) =
+        context.dataStore.edit { it[Keys.snapcastVolumeSync] = value }
+
+    suspend fun setSnapcastControlPort(port: Int) =
+        context.dataStore.edit { it[Keys.snapcastControlPort] = port }
 
     /** Whether the device trusts its dashboard template for the managed settings. */
     val managedEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->

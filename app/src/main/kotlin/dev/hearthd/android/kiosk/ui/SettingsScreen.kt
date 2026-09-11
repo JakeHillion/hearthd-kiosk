@@ -61,6 +61,9 @@ import dev.hearthd.android.kiosk.settings.SnapcastSettings
 import dev.hearthd.android.kiosk.snapcast.SnapcastController
 import dev.hearthd.android.kiosk.snapcast.SnapcastStatus
 import dev.hearthd.android.kiosk.snapcast.SnapcastUiState
+import dev.hearthd.android.kiosk.snapcast.SnapcastVolumeSync
+import dev.hearthd.android.kiosk.snapcast.VolumeSyncStatus
+import dev.hearthd.android.kiosk.snapcast.VolumeSyncUiState
 import dev.hearthd.android.kiosk.settings.THRESHOLD_RANGE
 import dev.hearthd.android.kiosk.settings.UpdateSettings
 import dev.hearthd.android.kiosk.settings.VoiceSettings
@@ -88,6 +91,7 @@ fun SettingsScreen(
     wakeWord: WakeWordDetector,
     dashboard: DashboardController,
     snapcast: SnapcastController,
+    volumeSync: SnapcastVolumeSync,
     managed: ManagedSettingsController,
     onRequestMicPermission: () -> Unit,
     onTestVoice: suspend (VoiceSettings) -> String,
@@ -103,6 +107,7 @@ fun SettingsScreen(
     val hearthdSettings by settingsRepo.hearthd.collectAsStateWithLifecycle(initialValue = HearthdSettings())
     val snapcastSettings by settingsRepo.snapcast.collectAsStateWithLifecycle(initialValue = SnapcastSettings())
     val snapcastUi by snapcast.state.collectAsStateWithLifecycle()
+    val volumeSyncUi by volumeSync.state.collectAsStateWithLifecycle()
     val managedEnabled by settingsRepo.managedEnabled.collectAsStateWithLifecycle(initialValue = false)
     val managedUi by managed.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -191,10 +196,13 @@ fun SettingsScreen(
             SettingsSection.AUDIO -> AudioPane(
                 settings = snapcastSettings,
                 ui = snapcastUi,
+                sync = volumeSyncUi,
                 locked = locked,
                 onEnabledChange = { scope.launch { settingsRepo.setSnapcastEnabled(it) } },
                 onHostChange = { scope.launch { settingsRepo.setSnapcastHost(it) } },
                 onPortChange = { scope.launch { settingsRepo.setSnapcastPort(it) } },
+                onVolumeSyncChange = { scope.launch { settingsRepo.setSnapcastVolumeSync(it) } },
+                onControlPortChange = { scope.launch { settingsRepo.setSnapcastControlPort(it) } },
             )
             SettingsSection.UPDATES -> UpdatesPane(
                 settings = settings,
@@ -400,18 +408,23 @@ private fun DisplayPane(
 private fun AudioPane(
     settings: SnapcastSettings,
     ui: SnapcastUiState,
+    sync: VolumeSyncUiState,
     locked: Boolean,
     onEnabledChange: (Boolean) -> Unit,
     onHostChange: (String) -> Unit,
     onPortChange: (Int) -> Unit,
+    onVolumeSyncChange: (Boolean) -> Unit,
+    onControlPortChange: (Int) -> Unit,
 ) {
     // Local field state so typing doesn't fight DataStore round-trips; each valid
     // edit is still persisted immediately. When locked the fields are
     // template-driven, so show the effective value rather than the local buffer.
     var host by rememberSaveable { mutableStateOf(settings.host) }
     var port by rememberSaveable { mutableStateOf(settings.port.toString()) }
+    var controlPort by rememberSaveable { mutableStateOf(settings.controlPort.toString()) }
     val shownHost = if (locked) settings.host else host
     val shownPort = if (locked) settings.port.toString() else port
+    val shownControlPort = if (locked) settings.controlPort.toString() else controlPort
 
     Column(
         modifier = Modifier
@@ -469,6 +482,42 @@ private fun AudioPane(
         // Live status of the client subprocess.
         Text(snapcastStatusLine(ui), style = MaterialTheme.typography.bodyMedium)
         ui.lastLine?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(it, style = MaterialTheme.typography.bodySmall)
+        }
+        Spacer(Modifier.height(24.dp))
+
+        // Volume sync: its own opt-in on top of the client.
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(stringResource(R.string.snapcast_volume_sync), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    stringResource(R.string.snapcast_volume_sync_summary),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Switch(checked = settings.volumeSync, onCheckedChange = onVolumeSyncChange, enabled = !locked)
+        }
+        Spacer(Modifier.height(16.dp))
+        OutlinedTextField(
+            value = shownControlPort,
+            onValueChange = { new ->
+                controlPort = new.filter { it.isDigit() }.take(5)
+                controlPort.toIntOrNull()?.let { if (it in 1..65535) onControlPortChange(it) }
+            },
+            label = { Text(stringResource(R.string.snapcast_control_port)) },
+            placeholder = { Text(SnapcastSettings.DEFAULT_CONTROL_PORT.toString()) },
+            singleLine = true,
+            enabled = !locked,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(20.dp))
+
+        // Live status of the volume link: what the server holds, what the device
+        // is at, and the last transfer between them — so a change made at either
+        // end can be watched landing at the other.
+        Text(volumeSyncStatusLine(sync), style = MaterialTheme.typography.bodyMedium)
+        sync.lastEvent?.let {
             Spacer(Modifier.height(8.dp))
             Text(it, style = MaterialTheme.typography.bodySmall)
         }
@@ -1015,6 +1064,16 @@ private fun snapcastStatusLine(ui: SnapcastUiState): String = when (ui.status) {
     SnapcastStatus.STARTING -> "Starting… (${ui.server})"
     SnapcastStatus.RUNNING -> "Playing from ${ui.server}"
     SnapcastStatus.ERROR -> "Error: ${ui.message ?: "unknown error"}"
+}
+
+private fun volumeSyncStatusLine(ui: VolumeSyncUiState): String = when (ui.status) {
+    VolumeSyncStatus.DISABLED -> "Volume sync off"
+    VolumeSyncStatus.CONNECTING -> "Connecting to ${ui.server}…" + (ui.message?.let { " ($it)" } ?: "")
+    VolumeSyncStatus.SYNCED -> {
+        val server = ui.serverPercent?.let { "$it%" + if (ui.serverMuted) " (muted)" else "" } ?: "unknown"
+        "Synced with ${ui.server} · server $server · device ${ui.deviceIndex}/${ui.deviceMax}"
+    }
+    VolumeSyncStatus.ERROR -> "Volume sync error: ${ui.message ?: "unknown error"}"
 }
 
 private fun wakeStatusLine(ui: WakeWordUiState): String = when (ui.status) {

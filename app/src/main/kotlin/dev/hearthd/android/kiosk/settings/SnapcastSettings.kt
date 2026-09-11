@@ -12,10 +12,19 @@ data class SnapcastSettings(
     val enabled: Boolean = false,
     val host: String = "",
     val port: Int = DEFAULT_PORT,
+    /**
+     * Let the server set this device's music volume, and report volume changes
+     * made on the device back to it, over snapserver's JSON-RPC control port on
+     * the same host. Off, the client scales the audio itself and the device's
+     * own volume is independent of the server's.
+     */
+    val volumeSync: Boolean = false,
+    val controlPort: Int = DEFAULT_CONTROL_PORT,
 ) {
     val configured: Boolean get() = host.isNotBlank()
 
     companion object {
         const val DEFAULT_PORT = 1704
+        const val DEFAULT_CONTROL_PORT = 1705
     }
 }

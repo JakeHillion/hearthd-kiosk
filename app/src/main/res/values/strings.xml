@@ -40,6 +40,9 @@
     <string name="snapcast_enable_summary">Play synchronized multi-room audio from a Snapcast server. Off by default; nothing connects until enabled and a server is set.</string>
     <string name="snapcast_host">Server host</string>
     <string name="snapcast_port">Server port</string>
+    <string name="snapcast_volume_sync">Server volume control</string>
+    <string name="snapcast_volume_sync_summary">Let the Snapcast server set this device\'s music volume, and report volume changes made here back to it. Off by default; uses the server\'s control port.</string>
+    <string name="snapcast_control_port">Control port</string>
     <string name="snapcast_note">This integration is early and subject to change. Plain TCP only — no TLS or authentication.</string>
     <string name="settings_wake_word">Wake word</string>
     <string name="settings_assistant">Assistant</string>

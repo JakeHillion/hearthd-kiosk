@@ -66,21 +66,20 @@ class SnapcastController(private val context: Context) {
             return
         }
 
-        // A stable id so the server recognises this client across reconnects.
-        // hostID defaults to a MAC address, which Android no longer exposes.
-        @Suppress("HardwareIds")
-        val hostId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
-            ?: "hearthd-kiosk"
-
+        val args = buildList {
+            add(exe.absolutePath)
+            add("-h"); add(settings.host)
+            add("-p"); add(settings.port.toString())
+            add("--player"); add("oboe")
+            add("--hostID"); add(clientId(context))
+            add("--logsink"); add("stdout")
+            // With volume sync the device's own music-stream level is the mixer
+            // (see SnapcastVolumeSync), so the client must not scale the samples
+            // by the server's volume as well.
+            if (settings.volumeSync) { add("--mixer"); add("none") }
+        }
         val process = withContext(Dispatchers.IO) {
-            ProcessBuilder(
-                exe.absolutePath,
-                "-h", settings.host,
-                "-p", settings.port.toString(),
-                "--player", "oboe",
-                "--hostID", hostId,
-                "--logsink", "stdout",
-            ).redirectErrorStream(true).start()
+            ProcessBuilder(args).redirectErrorStream(true).start()
         }
 
         // Blocking process I/O isn't interruptible, so cancellation can't unblock
@@ -108,9 +107,21 @@ class SnapcastController(private val context: Context) {
         }
     }
 
-    private companion object {
+    companion object {
         // The APK ships the snapclient executable under this jniLibs name (the
         // trick Android uses to run a native binary from an app).
-        const val LIB_NAME = "libsnapclient.so"
+        private const val LIB_NAME = "libsnapclient.so"
+
+        /**
+         * The id this device reports to the server as its `hostID`, stable across
+         * reconnects so the server keeps recognising (and configuring) the same
+         * client. snapclient defaults to the MAC address, which Android no longer
+         * exposes. With the default instance this is the client id verbatim, which
+         * is how the control port addresses it.
+         */
+        @Suppress("HardwareIds")
+        fun clientId(context: Context): String =
+            Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+                ?: "hearthd-kiosk"
     }
 }
