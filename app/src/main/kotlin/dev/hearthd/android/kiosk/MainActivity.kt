@@ -28,11 +28,14 @@ import androidx.lifecycle.repeatOnLifecycle
 import dev.hearthd.android.kiosk.dashboard.DashboardController
 import dev.hearthd.android.kiosk.dashboard.LightController
 import dev.hearthd.android.kiosk.dashboard.LocalLightCommander
+import dev.hearthd.android.kiosk.nowplaying.LocalNowPlaying
+import dev.hearthd.android.kiosk.nowplaying.NowPlayingService
 import dev.hearthd.android.kiosk.settings.HearthdSettings
 import dev.hearthd.android.kiosk.settings.ManagedSettingsController
 import dev.hearthd.android.kiosk.settings.SettingsRepository
 import dev.hearthd.android.kiosk.settings.VoiceSettings
 import dev.hearthd.android.kiosk.snapcast.SnapcastController
+import dev.hearthd.android.kiosk.snapcast.SnapcastNowPlaying
 import dev.hearthd.android.kiosk.snapcast.SnapcastVolumeSync
 import dev.hearthd.android.kiosk.ui.KioskScreen
 import dev.hearthd.android.kiosk.ui.SettingsScreen
@@ -83,6 +86,13 @@ class MainActivity : ComponentActivity() {
         val dashboard = DashboardController()
         val snapcast = SnapcastController(applicationContext)
         val volumeSync = SnapcastVolumeSync(applicationContext)
+        // What's playing, read from the same Snapcast server. Demand-driven
+        // rather than a foreground loop like the controllers below: it connects
+        // only while something on screen is actually showing a track, so it
+        // needs no wiring here beyond being handed to the things that read it.
+        val snapcastNowPlaying =
+            SnapcastNowPlaying(applicationContext, lifecycleScope, settingsRepo.snapcast)
+        val nowPlaying = NowPlayingService(lifecycleScope, listOf(snapcastNowPlaying))
         // Template control: polls a remote template and persists its `settings`
         // blob, which SettingsRepository overlays over the local domains.
         val managed = ManagedSettingsController(
@@ -240,6 +250,7 @@ class MainActivity : ComponentActivity() {
                             dashboard = dashboard,
                             snapcast = snapcast,
                             volumeSync = volumeSync,
+                            nowPlaying = snapcastNowPlaying,
                             managed = managed,
                             onRequestMicPermission = { requestMic.launch(Manifest.permission.RECORD_AUDIO) },
                             onTestVoice = ::testVoiceConnection,
@@ -248,7 +259,10 @@ class MainActivity : ComponentActivity() {
                     } else {
                         val voiceSettings by settingsRepo.voice
                             .collectAsStateWithLifecycle(initialValue = VoiceSettings())
-                        CompositionLocalProvider(LocalLightCommander provides lightCommander) {
+                        CompositionLocalProvider(
+                            LocalLightCommander provides lightCommander,
+                            LocalNowPlaying provides nowPlaying.state,
+                        ) {
                             KioskScreen(
                                 detections = wakeWord.events,
                                 voiceUi = voice.ui,
