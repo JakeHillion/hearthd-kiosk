@@ -261,7 +261,7 @@ class MainActivity : ComponentActivity() {
                             .collectAsStateWithLifecycle(initialValue = VoiceSettings())
                         CompositionLocalProvider(
                             LocalLightCommander provides lightCommander,
-                            LocalNowPlaying provides nowPlaying.state,
+                            LocalNowPlaying provides nowPlaying,
                         ) {
                             KioskScreen(
                                 detections = wakeWord.events,
