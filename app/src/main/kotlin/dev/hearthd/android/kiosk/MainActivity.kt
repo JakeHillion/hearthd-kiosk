@@ -33,6 +33,7 @@ import dev.hearthd.android.kiosk.settings.ManagedSettingsController
 import dev.hearthd.android.kiosk.settings.SettingsRepository
 import dev.hearthd.android.kiosk.settings.VoiceSettings
 import dev.hearthd.android.kiosk.snapcast.SnapcastController
+import dev.hearthd.android.kiosk.snapcast.SnapcastVolumeSync
 import dev.hearthd.android.kiosk.ui.KioskScreen
 import dev.hearthd.android.kiosk.ui.SettingsScreen
 import dev.hearthd.android.kiosk.ui.theme.kioskTypography
@@ -81,6 +82,7 @@ class MainActivity : ComponentActivity() {
         val voice = VoiceController(lifecycleScope)
         val dashboard = DashboardController()
         val snapcast = SnapcastController(applicationContext)
+        val volumeSync = SnapcastVolumeSync(applicationContext)
         // Template control: polls a remote template and persists its `settings`
         // blob, which SettingsRepository overlays over the local domains.
         val managed = ManagedSettingsController(
@@ -189,6 +191,21 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // Volume sync with the same server, on the same footing as the client
+        // above and gated by its own opt-in: the control-port link is up only
+        // while the client is on and the server has been given the volume.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                settingsRepo.snapcast.collectLatest { s ->
+                    if (!s.enabled || !s.configured || !s.volumeSync) {
+                        volumeSync.markDisabled()
+                        return@collectLatest
+                    }
+                    volumeSync.run(s)
+                }
+            }
+        }
+
         // Voice (Alpha): when enabled + configured, a wake-word detection starts
         // a Home Assistant turn, streaming the mic frames the detector publishes.
         // collectLatest rebuilds the assistant when the HA settings change.
@@ -222,6 +239,7 @@ class MainActivity : ComponentActivity() {
                             wakeWord = wakeWord,
                             dashboard = dashboard,
                             snapcast = snapcast,
+                            volumeSync = volumeSync,
                             managed = managed,
                             onRequestMicPermission = { requestMic.launch(Manifest.permission.RECORD_AUDIO) },
                             onTestVoice = ::testVoiceConnection,
