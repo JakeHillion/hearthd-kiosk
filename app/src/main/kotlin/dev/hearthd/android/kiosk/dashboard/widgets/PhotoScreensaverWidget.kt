@@ -95,7 +95,7 @@ data class PhotoScreensaverWidget(
         // while the saver is showing, so subscribing there would drop the
         // source's link on every touch and reconnect it after the dwell.
         val nowPlaying = if (showNowPlaying) {
-            LocalNowPlaying.current.collectAsStateWithLifecycle().value
+            LocalNowPlaying.current.state.collectAsStateWithLifecycle().value
         } else {
             null
         }

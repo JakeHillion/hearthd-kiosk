@@ -2,7 +2,9 @@ package dev.hearthd.android.kiosk.snapcast
 
 import android.content.Context
 import dev.hearthd.android.kiosk.nowplaying.NowPlaying
+import dev.hearthd.android.kiosk.nowplaying.NowPlayingCommand
 import dev.hearthd.android.kiosk.nowplaying.NowPlayingSource
+import dev.hearthd.android.kiosk.nowplaying.Playback
 import dev.hearthd.android.kiosk.settings.SnapcastSettings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -56,6 +58,12 @@ data class SnapcastNowPlayingUiState(
  * might have moved us to another group is answered by asking for the status
  * again rather than tracking it.
  *
+ * Transport commands go back the other way as `Stream.Control` on the same
+ * connection. What the stream will accept is the stream's own account of itself
+ * — the `can…` properties — so a pipe with nothing behind it offers no controls
+ * while a Spotify stream offers the lot, and the server enforces the same guards
+ * again at its end.
+ *
  * Unlike the other Snapcast pieces this holds no state and has no `run`: it is a
  * cold flow, live only while collected, so the socket exists only while
  * something is actually showing what's playing (see `NowPlayingService`).
@@ -85,6 +93,27 @@ class SnapcastNowPlaying(
 
     override val nowPlaying: Flow<NowPlaying?> =
         state.map { it.nowPlaying }.distinctUntilChanged()
+
+    // The live session's way to command the stream it's following, replaced
+    // whenever that stream changes and dropped when the connection goes. Written
+    // from the session, read from the UI thread on a button press.
+    @Volatile
+    private var control: ((String) -> Unit)? = null
+
+    /**
+     * Ask the stream to act. Dropped when nothing is connected or no stream is
+     * ours — the same fire-and-forget footing as a light command sent to an
+     * unconfigured hearthd.
+     */
+    override fun send(command: NowPlayingCommand) {
+        control?.invoke(
+            when (command) {
+                NowPlayingCommand.PLAY_PAUSE -> "playPause"
+                NowPlayingCommand.NEXT -> "next"
+                NowPlayingCommand.PREVIOUS -> "previous"
+            },
+        )
+    }
 
     /** Keep a connection to [settings]' control port up, reconnecting with backoff. */
     private fun link(settings: SnapcastSettings): Flow<SnapcastNowPlayingUiState> = channelFlow {
@@ -175,6 +204,9 @@ class SnapcastNowPlaying(
                 if (updated == link && live) continue
                 link = updated
                 live = true
+                control = link.streamId?.let { id ->
+                    { command -> call("Stream.Control", controlParams(id, command)) }
+                }
                 emit(
                     SnapcastNowPlayingUiState(
                         status = NowPlayingStatus.LIVE,
@@ -186,6 +218,7 @@ class SnapcastNowPlaying(
             }
             throw IOException("connection closed")
         } finally {
+            control = null
             // Blocking socket I/O isn't interruptible; closing the socket is what
             // unblocks the reader, and this runs as soon as the scope is cancelled.
             runCatching { socket.close() }
@@ -194,20 +227,38 @@ class SnapcastNowPlaying(
 
     /**
      * What one connection has learned so far: which stream is ours, whether it's
-     * carrying audio, and the last metadata it published.
+     * carrying audio, and the last properties it published.
      */
     private data class Link(
         val streamId: String? = null,
         val playing: Boolean = false,
         val metadata: NowPlaying? = null,
+        val controls: Controls = Controls(),
     ) {
         /**
-         * Snapserver holds a stream's last metadata after it goes quiet, so a
-         * track only counts as playing while the stream is actually carrying
-         * audio — otherwise the screensaver would show this morning's song all
-         * evening.
+         * Snapserver holds a stream's last properties after it goes quiet, so a
+         * track counts as playing only while the stream is carrying audio, and as
+         * paused only on a player that says so. Otherwise the screensaver would
+         * show this morning's song all evening — and a plugin that died mid-track
+         * would leave it there claiming to still be playing.
          */
-        val nowPlaying: NowPlaying? get() = metadata.takeIf { playing }
+        val nowPlaying: NowPlaying?
+            get() {
+                val track = metadata ?: return null
+                // A stream with no player behind it reports no status of its own,
+                // so audio flowing is all there is to go on.
+                val playback = controls.playback
+                    ?: if (playing) Playback.PLAYING else Playback.STOPPED
+                if (!playing && playback != Playback.PAUSED) return null
+                return track.copy(
+                    playback = playback,
+                    canPlay = controls.canPlay,
+                    canPause = controls.canPause,
+                    canGoNext = controls.canGoNext,
+                    canGoPrevious = controls.canGoPrevious,
+                    canControl = controls.canControl,
+                )
+            }
     }
 
     /** Fold one notification or response into [link]. Pure: the transport is [session]'s. */
@@ -227,16 +278,21 @@ class SnapcastNowPlaying(
                 // accept that shape too.
                 val properties = params.optJSONObject("properties") ?: params
                 // A partial update carries no metadata, and the server enriches
-                // it with what it already holds, so absent means unchanged.
-                link.copy(metadata = nowPlayingOf(properties) ?: link.metadata)
+                // it with what it already holds, so absent means unchanged. The
+                // transport properties are always complete, so they just replace.
+                link.copy(
+                    metadata = nowPlayingOf(properties) ?: link.metadata,
+                    controls = controlsOf(properties),
+                )
             }
             "Stream.OnUpdate" -> {
                 val stream = params?.optJSONObject("stream") ?: return link
                 if (stream.optString("id") != link.streamId) return link
+                val properties = stream.optJSONObject("properties")
                 link.copy(
                     playing = stream.optString("status") == STATUS_PLAYING,
-                    metadata = stream.optJSONObject("properties")
-                        ?.let { nowPlayingOf(it) } ?: link.metadata,
+                    metadata = properties?.let { nowPlayingOf(it) } ?: link.metadata,
+                    controls = properties?.let { controlsOf(it) } ?: link.controls,
                 )
             }
             // The whole server picture, sent when clients join or move groups.
@@ -273,10 +329,12 @@ class SnapcastNowPlaying(
             .firstOrNull { it.optString("id") == streamId }
             ?: return Link(streamId = streamId)
 
+        val properties = stream.optJSONObject("properties")
         return Link(
             streamId = streamId,
             playing = stream.optString("status") == STATUS_PLAYING,
-            metadata = stream.optJSONObject("properties")?.let { nowPlayingOf(it) },
+            metadata = properties?.let { nowPlayingOf(it) },
+            controls = properties?.let { controlsOf(it) } ?: Controls(),
         )
     }
 
@@ -294,6 +352,47 @@ class SnapcastNowPlaying(
         const val STATUS_PLAYING = "playing"
     }
 }
+
+/**
+ * The transport half of a stream's properties. Separate from the metadata
+ * because the two update independently: a partial `Stream.OnProperties` replaces
+ * these outright while the server carries the metadata forward.
+ */
+private data class Controls(
+    val playback: Playback? = null,
+    val canPlay: Boolean = false,
+    val canPause: Boolean = false,
+    val canGoNext: Boolean = false,
+    val canGoPrevious: Boolean = false,
+    val canControl: Boolean = false,
+)
+
+/**
+ * What a stream's `properties` say its player will accept. A stream with no
+ * player behind it — a bare pipe — reports none of this, which is exactly how a
+ * consumer learns not to offer controls. `playbackStatus` is absent or "unknown"
+ * in the same case, and stays null so the caller can fall back to whether audio
+ * is flowing.
+ */
+private fun controlsOf(properties: JSONObject) = Controls(
+    playback = when (properties.optString("playbackStatus")) {
+        "playing" -> Playback.PLAYING
+        "paused" -> Playback.PAUSED
+        "stopped" -> Playback.STOPPED
+        else -> null
+    },
+    canPlay = properties.optBoolean("canPlay"),
+    canPause = properties.optBoolean("canPause"),
+    canGoNext = properties.optBoolean("canGoNext"),
+    canGoPrevious = properties.optBoolean("canGoPrevious"),
+    canControl = properties.optBoolean("canControl"),
+)
+
+/** The `Stream.Control` params for one command against [streamId]. */
+private fun controlParams(streamId: String, command: String): JSONObject = JSONObject()
+    .put("id", streamId)
+    .put("command", command)
+    .put("params", JSONObject())
 
 /**
  * The track out of a stream's `properties`, or null when there isn't one. The
