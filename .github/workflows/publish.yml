@@ -6,6 +6,10 @@ name: Publish
 on:
   push:
     branches: [main, canary]
+  workflow_dispatch:
+    # Manual trigger. The stream logic below always routes a manual run to the
+    # canary stream, so dispatching from either branch can never ship main
+    # directly.
   # Nightly promotion: drag canary forward to main's current build so canary can
   # never silently lag behind, even if no one pushes it. A scheduled run checks
   # out the default branch (main), so the build is main's HEAD; the stream step
@@ -39,6 +43,9 @@ jobs:
         run: |
           if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
             # Nightly run: promote main's build to the canary stream.
+            stream="canary"
+          elif [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            # Manual run: always publish to canary, never directly to main.
             stream="canary"
           else
             stream="$GITHUB_REF_NAME"
