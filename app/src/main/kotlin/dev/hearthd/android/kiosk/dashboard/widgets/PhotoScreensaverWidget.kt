@@ -28,6 +28,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -315,31 +316,52 @@ data class PhotoScreensaverWidget(
 }
 
 private const val PHOTO_FADE_MILLIS = 1_000
-private val NOW_PLAYING_ART_SIZE = 72.dp
-private val NOW_PLAYING_TEXT_WIDTH = 280.dp
+private val NOW_PLAYING_ART_SIZE = 96.dp
+private val NOW_PLAYING_TEXT_WIDTH = 360.dp
+
+// Sizes react to the panel, not just to pixel density. dp/sp already hold a
+// constant physical size across DPI — right for a phone read at a fixed
+// distance, wrong for a fixed kiosk panel read from across the room, where a
+// big screen still looks small. So the overlay scales with the usable screen
+// height: a small panel stays at base size, a large one grows (clamped) and the
+// block occupies the same share of the frame everywhere.
+// The reference is a ~7in tablet; larger panels multiply up to MAX_OVERLAY_SCALE.
+private const val REFERENCE_SCREEN_HEIGHT_DP = 800f
+private const val MIN_OVERLAY_SCALE = 1f
+private const val MAX_OVERLAY_SCALE = 2f
+
+@Composable
+private fun rememberOverlayScale(): Float {
+    val heightDp = LocalConfiguration.current.screenHeightDp.toFloat()
+    return (heightDp / REFERENCE_SCREEN_HEIGHT_DP).coerceIn(MIN_OVERLAY_SCALE, MAX_OVERLAY_SCALE)
+}
 
 /**
  * What's playing, opposite the clock. The text is right-aligned and the cover
  * hugs the corner, so the block reads outward from the frame the way the date
  * and weather do on the other side. The text is bounded and clipped to one line
- * each: a long title must not run back across the photo into the clock.
+ * each: a long title must not run back across the photo into the clock. Every
+ * size is multiplied by [rememberOverlayScale] so it grows with the panel.
  */
 @Composable
 private fun NowPlayingOverlay(nowPlaying: NowPlaying, modifier: Modifier = Modifier) {
     val subtitle = listOfNotNull(nowPlaying.artist, nowPlaying.album).joinToString(" · ")
+    val scale = rememberOverlayScale()
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp * scale),
     ) {
         Column(
             horizontalAlignment = Alignment.End,
-            modifier = Modifier.widthIn(max = NOW_PLAYING_TEXT_WIDTH),
+            modifier = Modifier.widthIn(max = NOW_PLAYING_TEXT_WIDTH * scale),
         ) {
             nowPlaying.title?.let {
                 Text(
                     text = it,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontSize = MaterialTheme.typography.titleLarge.fontSize * scale,
+                    ),
                     color = Color.White,
                     textAlign = TextAlign.End,
                     maxLines = 1,
@@ -349,7 +371,9 @@ private fun NowPlayingOverlay(nowPlaying: NowPlaying, modifier: Modifier = Modif
             if (subtitle.isNotBlank()) {
                 Text(
                     text = subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = MaterialTheme.typography.bodyMedium.fontSize * scale,
+                    ),
                     color = Color.White.copy(alpha = 0.75f),
                     textAlign = TextAlign.End,
                     maxLines = 1,
@@ -362,7 +386,7 @@ private fun NowPlayingOverlay(nowPlaying: NowPlaying, modifier: Modifier = Modif
                 model = it,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.size(NOW_PLAYING_ART_SIZE).clip(RoundedCornerShape(8.dp)),
+                modifier = Modifier.size(NOW_PLAYING_ART_SIZE * scale).clip(RoundedCornerShape(8.dp)),
             )
         }
     }
