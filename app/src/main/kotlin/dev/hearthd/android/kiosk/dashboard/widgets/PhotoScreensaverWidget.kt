@@ -42,6 +42,7 @@ import dev.hearthd.android.kiosk.dashboard.resolveObject
 import dev.hearthd.android.kiosk.dashboard.resolveString
 import dev.hearthd.android.kiosk.nowplaying.LocalNowPlaying
 import dev.hearthd.android.kiosk.nowplaying.NowPlaying
+import dev.hearthd.android.kiosk.nowplaying.Playback
 import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
@@ -73,9 +74,9 @@ import kotlin.math.roundToInt
  * overlay on black, still dimming the dashboard while idle.
  *
  * What's playing sits opposite the clock, bottom-right, and comes from the
- * device rather than from state — Snapcast today, via `LocalNowPlaying`. It's on
- * unless [showNowPlaying] turns it off, and shows nothing at all when nothing is
- * playing, so a silent house is just the photo.
+ * device rather than from state — Snapcast today, via `LocalNowPlaying`. It's
+ * on unless [showNowPlaying] turns it off, and only an actively-playing track
+ * is eligible: a paused or lingering one reads as silence.
  */
 data class PhotoScreensaverWidget(
     val child: Widget,
@@ -130,7 +131,7 @@ data class PhotoScreensaverWidget(
             )
 
             Overlay(state)
-            nowPlaying?.let {
+            nowPlaying?.takeIf { it.playback == Playback.PLAYING }?.let {
                 NowPlayingOverlay(
                     it,
                     Modifier.align(Alignment.BottomEnd).padding(32.dp),
