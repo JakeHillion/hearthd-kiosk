@@ -37,6 +37,7 @@ class SettingsRepository(private val context: Context) {
         val snapcastPort = intPreferencesKey("snapcast_port")
         val snapcastVolumeSync = booleanPreferencesKey("snapcast_volume_sync")
         val snapcastControlPort = intPreferencesKey("snapcast_control_port")
+        val screenControlEnabled = booleanPreferencesKey("screen_control_enabled")
         val managedEnabled = booleanPreferencesKey("managed_enabled")
         val managedCache = stringPreferencesKey("managed_cache")
     }
@@ -163,6 +164,20 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setSnapcastControlPort(port: Int) =
         context.dataStore.edit { it[Keys.snapcastControlPort] = port }
+
+    /**
+     * Whether the device lets its dashboard template drive the display's on/off
+     * state. The grant that actually permits a screen-off is device
+     * administration, which no template can give itself, so this is only the
+     * device saying it is willing.
+     */
+    val screenControlEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        val local = prefs[Keys.screenControlEnabled] ?: false
+        managedOverlay(prefs)?.screen?.enabled ?: local
+    }
+
+    suspend fun setScreenControlEnabled(value: Boolean) =
+        context.dataStore.edit { it[Keys.screenControlEnabled] = value }
 
     /** Whether the device trusts its dashboard template for the managed settings. */
     val managedEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->

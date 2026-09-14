@@ -3,6 +3,7 @@ package dev.hearthd.android.kiosk
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +32,7 @@ import dev.hearthd.android.kiosk.dashboard.LocalLightCommander
 import dev.hearthd.android.kiosk.nowplaying.LocalNowPlaying
 import dev.hearthd.android.kiosk.nowplaying.NowPlayingService
 import dev.hearthd.android.kiosk.settings.HearthdSettings
+import dev.hearthd.android.kiosk.screen.LocalScreenPower
 import dev.hearthd.android.kiosk.service.KioskService
 import dev.hearthd.android.kiosk.settings.ManagedSettingsController
 import dev.hearthd.android.kiosk.settings.VoiceSettings
@@ -111,6 +114,21 @@ class MainActivity : ComponentActivity() {
         )
         lifecycleScope.launch {
             settingsRepo.hearthd.collect { hearthdSettings = it }
+        }
+
+        // The activity's half of remote screen control. Keeping the panel lit is
+        // a window flag, so it can't live with the controller in the service;
+        // putting it out can't live here, because by then there is no window to
+        // ask. While nothing is driving the screen the flag is cleared and the
+        // device's own display timeout governs, as it always did.
+        lifecycleScope.launch {
+            app.screenPower.desiredOn.collect { on ->
+                if (on == true) {
+                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                }
+            }
         }
 
         // The update loop lives here, scoped to the foreground: it only runs
@@ -227,6 +245,9 @@ class MainActivity : ComponentActivity() {
                     // The kiosk surface is the root; Settings is reachable from
                     // its swipe-up tray and returns here on close.
                     var showSettings by rememberSaveable { mutableStateOf(false) }
+                    LaunchedEffect(showSettings) {
+                        app.screenPower.setSuspended(showSettings)
+                    }
                     if (showSettings) {
                         SettingsScreen(
                             settingsRepo = settingsRepo,
@@ -237,6 +258,7 @@ class MainActivity : ComponentActivity() {
                             volumeSync = volumeSync,
                             nowPlaying = snapcastNowPlaying,
                             managed = managed,
+                            screenPower = app.screenPower,
                             onRequestMicPermission = { requestMic.launch(Manifest.permission.RECORD_AUDIO) },
                             onTestVoice = ::testVoiceConnection,
                             onClose = { showSettings = false },
@@ -247,6 +269,7 @@ class MainActivity : ComponentActivity() {
                         CompositionLocalProvider(
                             LocalLightCommander provides lightCommander,
                             LocalNowPlaying provides nowPlaying,
+                            LocalScreenPower provides app.screenPower,
                         ) {
                             KioskScreen(
                                 detections = wakeWord.events,

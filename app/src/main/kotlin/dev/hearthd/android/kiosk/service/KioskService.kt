@@ -55,6 +55,7 @@ class KioskService : Service() {
         super.onCreate()
         startForeground()
         runDashboardPoll()
+        scope.launch { app.screenPower.run() }
     }
 
     // Restarted by the system if the process is reclaimed; redelivery isn't

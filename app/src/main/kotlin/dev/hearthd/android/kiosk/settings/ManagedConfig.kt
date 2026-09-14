@@ -21,6 +21,7 @@ data class ManagedConfig(
     val snapcast: SnapcastSettings = SnapcastSettings(),
     val wakeWord: WakeWordSettings = WakeWordSettings(),
     val voice: VoiceSettings = VoiceSettings(),
+    val screen: ScreenSettings = ScreenSettings(),
 ) {
     companion object {
         /** Parse the template's `settings` object; every field is optional. */
@@ -56,6 +57,9 @@ data class ManagedConfig(
                     pipelineId = v.optString("pipeline_id", ""),
                 )
             } ?: VoiceSettings(),
+            screen = obj.optJSONObject("screen")?.let { s ->
+                ScreenSettings(enabled = s.optBoolean("enabled", false))
+            } ?: ScreenSettings(),
         )
     }
 }

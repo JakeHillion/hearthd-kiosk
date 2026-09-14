@@ -2,6 +2,7 @@ package dev.hearthd.android.kiosk
 
 import android.app.Application
 import dev.hearthd.android.kiosk.dashboard.DashboardController
+import dev.hearthd.android.kiosk.screen.ScreenPowerController
 import dev.hearthd.android.kiosk.settings.SettingsRepository
 
 /**
@@ -24,4 +25,9 @@ class KioskApp : Application() {
 
     /** The polled dashboard template and state. */
     val dashboard: DashboardController by lazy { DashboardController() }
+
+    /** Remote control of the display, driven by whatever [dashboard] last polled. */
+    val screenPower: ScreenPowerController by lazy {
+        ScreenPowerController(this, dashboard.state, settings.screenControlEnabled)
+    }
 }
