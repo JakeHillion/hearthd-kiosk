@@ -49,6 +49,9 @@ import dev.hearthd.android.kiosk.R
 import dev.hearthd.android.kiosk.dashboard.DashboardController
 import dev.hearthd.android.kiosk.dashboard.DashboardStatus
 import dev.hearthd.android.kiosk.dashboard.DashboardUiState
+import dev.hearthd.android.kiosk.screen.DeviceAdmin
+import dev.hearthd.android.kiosk.screen.ScreenPowerController
+import dev.hearthd.android.kiosk.screen.ScreenPowerUiState
 import dev.hearthd.android.kiosk.settings.Channel
 import dev.hearthd.android.kiosk.settings.DashboardSettings
 import dev.hearthd.android.kiosk.settings.HearthdSettings
@@ -97,6 +100,7 @@ fun SettingsScreen(
     volumeSync: SnapcastVolumeSync,
     nowPlaying: SnapcastNowPlaying,
     managed: ManagedSettingsController,
+    screenPower: ScreenPowerController,
     onRequestMicPermission: () -> Unit,
     onTestVoice: suspend (VoiceSettings) -> String,
     onClose: () -> Unit,
@@ -117,6 +121,8 @@ fun SettingsScreen(
     val nowPlayingUi by nowPlaying.state.collectAsStateWithLifecycle()
     val managedEnabled by settingsRepo.managedEnabled.collectAsStateWithLifecycle(initialValue = false)
     val managedUi by managed.state.collectAsStateWithLifecycle()
+    val screenPowerUi by screenPower.state.collectAsStateWithLifecycle()
+    val screenPowerAdmin = screenPower.admin
     val scope = rememberCoroutineScope()
     var section by rememberSaveable { mutableStateOf(SettingsSection.DISPLAY) }
 
@@ -193,6 +199,8 @@ fun SettingsScreen(
                 settings = dashboardSettings,
                 ui = dashboardUi,
                 hearthdSettings = hearthdSettings,
+                screenPower = screenPowerUi,
+                admin = screenPowerAdmin,
                 locked = locked,
                 onEnabledChange = { scope.launch { settingsRepo.setDashboardEnabled(it) } },
                 onStateUrlChange = { scope.launch { settingsRepo.setDashboardStateUrl(it) } },
@@ -319,6 +327,8 @@ private fun DisplayPane(
     settings: DashboardSettings,
     ui: DashboardUiState,
     hearthdSettings: HearthdSettings,
+    screenPower: ScreenPowerUiState,
+    admin: DeviceAdmin,
     locked: Boolean,
     onEnabledChange: (Boolean) -> Unit,
     onStateUrlChange: (String) -> Unit,
@@ -408,6 +418,71 @@ private fun DisplayPane(
             singleLine = true,
             enabled = !locked,
             modifier = Modifier.fillMaxWidth(),
+        )
+
+        // ── Screen control ────────────────────────────────────────────────
+        Spacer(Modifier.height(40.dp))
+        SectionHeading(stringResource(R.string.settings_screen_control))
+        ScreenControlSettings(ui = screenPower, admin = admin)
+    }
+}
+
+/**
+ * Remote control of the display. A template can only put the panel out once the
+ * system has granted device administration — the permission that makes a
+ * screen-off legal at all, and one only a person standing at the device can give.
+ *
+ * The revoke button matters as much as the grant. An active device admin can't
+ * be uninstalled, and some devices bury the admin list where it can't easily be
+ * found, so the app has to be able to hand the grant back itself.
+ */
+@Composable
+private fun ScreenControlSettings(
+    ui: ScreenPowerUiState,
+    admin: DeviceAdmin,
+) {
+    val context = LocalContext.current
+    val explanation = stringResource(R.string.screen_control_admin_explanation)
+    // isAdminActive is a live system fact, not part of our own state, so it is
+    // re-read whenever the operator comes back from the consent dialog.
+    var active by remember { mutableStateOf(admin.active) }
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) active = admin.active
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+
+    Text(
+        text = when {
+            !admin.supported -> stringResource(R.string.screen_control_unsupported)
+            !active -> stringResource(R.string.screen_control_admin_inactive)
+            !admin.canLock -> stringResource(R.string.screen_control_policy_missing)
+            ui.desiredOn == null -> stringResource(R.string.screen_control_idle)
+            ui.desiredOn == true -> stringResource(R.string.screen_control_driving_on)
+            else -> stringResource(R.string.screen_control_driving_off)
+        },
+        style = MaterialTheme.typography.bodyMedium,
+    )
+    Spacer(Modifier.height(16.dp))
+
+    if (active) {
+        OutlinedButton(onClick = { admin.revoke(); active = admin.active }) {
+            Text(stringResource(R.string.screen_control_revoke))
+        }
+    } else {
+        OutlinedButton(
+            enabled = admin.supported,
+            onClick = { context.startActivity(admin.activationIntent(explanation)) },
+        ) {
+            Text(stringResource(R.string.screen_control_grant))
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            stringResource(R.string.screen_control_restricted_hint),
+            style = MaterialTheme.typography.bodySmall,
         )
     }
 }

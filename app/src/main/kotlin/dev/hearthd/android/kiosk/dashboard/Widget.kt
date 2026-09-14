@@ -11,6 +11,7 @@ import dev.hearthd.android.kiosk.dashboard.widgets.GridWidget
 import dev.hearthd.android.kiosk.dashboard.widgets.LightGroupWidget
 import dev.hearthd.android.kiosk.dashboard.widgets.NowPlayingWidget
 import dev.hearthd.android.kiosk.dashboard.widgets.PhotoScreensaverWidget
+import dev.hearthd.android.kiosk.dashboard.widgets.ScreenPowerWidget
 import dev.hearthd.android.kiosk.dashboard.widgets.WeatherWidget
 import org.json.JSONObject
 
@@ -56,6 +57,7 @@ fun parseWidget(obj: JSONObject): Widget = when (val type = obj.optString("type"
     "light_group" -> LightGroupWidget.parse(obj)
     "now_playing" -> NowPlayingWidget.parse(obj)
     "photo_screensaver" -> PhotoScreensaverWidget.parse(obj)
+    "screen_power" -> ScreenPowerWidget.parse(obj)
     else -> UnknownWidget(type)
 }
 

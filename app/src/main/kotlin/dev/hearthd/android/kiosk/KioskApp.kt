@@ -5,6 +5,7 @@ import android.app.Application
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import dev.hearthd.android.kiosk.dashboard.DashboardController
+import dev.hearthd.android.kiosk.screen.ScreenPowerController
 import dev.hearthd.android.kiosk.settings.ManagedSettingsController
 import dev.hearthd.android.kiosk.settings.SettingsRepository
 import dev.hearthd.android.kiosk.snapcast.SnapcastController
@@ -86,4 +87,9 @@ class KioskApp : Application() {
     fun hasMicPermission(): Boolean =
         ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
+
+    /** Remote control of the display, driven by whatever [dashboard] last polled. */
+    val screenPower: ScreenPowerController by lazy {
+        ScreenPowerController(this, dashboard.state)
+    }
 }
