@@ -5,6 +5,16 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- The kiosk's run loops outlive the screen, so they need a foreground
+         service to keep the process alive while nothing is drawn. specialUse
+         because no stock type describes "keeps a wall panel running"; dataSync
+         is the near miss, and its six-hour daily budget would kill us. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Only so the service's own notification is visible; the service runs
+         either way. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- Only used once the user opts in to wake-word detection. The mic is not
          essential to the kiosk, so a device without one can still install. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -13,6 +23,7 @@
         android:required="false" />
 
     <application
+        android:name=".KioskApp"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -37,6 +48,19 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <!-- Started by MainActivity and never stopped. As the home app we are
+             launched on boot, so that start covers a reboot too; a service that
+             stopped while the screen was off might not be allowed to restart
+             itself (API 31+ restricts foreground starts from the background). -->
+        <service
+            android:name=".service.KioskService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the wall-panel dashboard polling and its display under control while the screen is off" />
+        </service>
 
         <!-- Receives PackageInstaller session status (e.g. the "confirm install"
              prompt when we are not the device owner). Internal only. -->
