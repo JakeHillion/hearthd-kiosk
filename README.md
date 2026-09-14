@@ -91,6 +91,32 @@ install above works regardless. To restore the verifier:
 > provisioned Portal does). Disabling the verifier is currently the only way to
 > let a non-Meta-signed build update itself.
 
+### Remote screen control
+
+Switching the display on and off from the dashboard (the `screen_power` widget)
+needs an active device admin holding `force-lock`: `lockNow()` is the only way
+a non-privileged app can put the panel out. On Portal the in-app consent dialog
+under **Settings → Display → Screen control** refuses with "Device Management
+Policies are not supported for this app", so activate the admin over ADB
+instead:
+
+    adb shell dpm set-active-admin dev.hearthd.android.kiosk/.update.KioskDeviceAdminReceiver
+
+This is device *admin*, not device *owner* — unrelated to the silent-install
+path above, and unaffected by the accounts that block `dpm set-device-owner`.
+Other devices can grant it from the in-app button and need no shell at all.
+
+The device's screen lock must be **None**. `lockNow()` on a device with no lock
+type set sleeps the display without locking it, which is exactly the behaviour
+wanted; with a secure lock set, every screen-off would demand a PIN to come
+back.
+
+> [!NOTE]
+> Deactivate from **Settings → Display → Screen control → Revoke device
+> administration** in the app. Android refuses `dpm remove-active-admin` from
+> the shell for a non-test admin, so that button is the only way back — and
+> `adb uninstall` is refused while the admin is active.
+
 To hand control back to the stock Portal launcher:
 
     adb shell cmd package set-home-activity com.facebook.alohaapps.launcher/com.facebook.aloha.app.home.touch.HomeActivity
