@@ -15,6 +15,9 @@
          either way. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Lighting the panel again once the kiosk has put it out. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <!-- Only used once the user opts in to wake-word detection. The mic is not
          essential to the kiosk, so a device without one can still install. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -48,6 +51,19 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <!-- Exists only to be launched: the platform arms "turn the screen on"
+             as part of an activity launch, so the kiosk activity already sitting
+             behind a dark panel can't wake itself however it is flagged. This
+             one appears for a frame and finishes. -->
+        <activity
+            android:name=".screen.WakeActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <!-- Started by MainActivity and never stopped. As the home app we are
              launched on boot, so that start covers a reboot too; a service that

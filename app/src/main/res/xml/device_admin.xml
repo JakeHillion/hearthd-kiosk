@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Minimal admin policy set. Device-owner status (not these policies) is what
-     enables silent installs; we request no additional powers. -->
+<!-- Device-owner status (not these policies) is what enables silent installs;
+     force-lock is requested separately, and is what lets the kiosk put the
+     display out under remote control. On a device with no lock type set,
+     lockNow() degenerates into exactly that: sleep the screen, lock nothing. -->
 <device-admin xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-policies />
+    <uses-policies>
+        <force-lock />
+    </uses-policies>
 </device-admin>

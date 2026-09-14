@@ -57,6 +57,24 @@ fun Binding.resolveDouble(state: JSONObject): Double? = when (val v = resolve(st
     else -> null
 }
 
+/**
+ * Resolve and coerce to a Boolean, or null when absent or unintelligible. The
+ * spellings accepted beyond a JSON boolean are the ones a home-automation state
+ * blob actually carries: an on/off string, or a 0/1 attribute read straight off
+ * a cluster.
+ */
+fun Binding.resolveBoolean(state: JSONObject): Boolean? = when (val v = resolve(state)) {
+    null, JSONObject.NULL -> null
+    is Boolean -> v
+    is Number -> v.toDouble() != 0.0
+    is String -> when (v.lowercase()) {
+        "true", "on", "1", "yes" -> true
+        "false", "off", "0", "no" -> false
+        else -> null
+    }
+    else -> null
+}
+
 /** Walk a dotted path through nested objects. Returns null on any missing segment. */
 private fun resolvePath(state: JSONObject, path: String): Any? {
     var current: Any? = state
