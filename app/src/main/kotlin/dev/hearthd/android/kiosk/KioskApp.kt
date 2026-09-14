@@ -2,7 +2,9 @@ package dev.hearthd.android.kiosk
 
 import android.app.Application
 import dev.hearthd.android.kiosk.dashboard.DashboardController
+import dev.hearthd.android.kiosk.settings.ManagedSettingsController
 import dev.hearthd.android.kiosk.settings.SettingsRepository
+import kotlinx.coroutines.flow.first
 
 /**
  * Holds the objects whose lifetime is the process rather than the screen.
@@ -22,6 +24,25 @@ class KioskApp : Application() {
     /** Persisted preferences; a DataStore singleton underneath, so shared by all. */
     val settings: SettingsRepository by lazy { SettingsRepository(this) }
 
-    /** The polled dashboard template and state. */
-    val dashboard: DashboardController by lazy { DashboardController() }
+    /**
+     * Template control: persists the `settings` blob out of whatever body the
+     * dashboard poll last verified.
+     */
+    val managed: ManagedSettingsController by lazy {
+        ManagedSettingsController(saveConfig = { settings.setManagedCache(it) })
+    }
+
+    /**
+     * The polled dashboard template and state, and the kiosk's only reader of
+     * `/state`. Its template body feeds [managed] too, but only while the device
+     * has opted into template control — otherwise the blob it persists would be
+     * overlaid the moment someone turned the setting on.
+     */
+    val dashboard: DashboardController by lazy {
+        DashboardController(
+            onTemplate = { json, interval ->
+                if (settings.managedEnabled.first()) managed.accept(json, interval)
+            },
+        )
+    }
 }
