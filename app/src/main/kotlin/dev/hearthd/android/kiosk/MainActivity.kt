@@ -25,14 +25,13 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import dev.hearthd.android.kiosk.dashboard.DashboardController
 import dev.hearthd.android.kiosk.dashboard.LightController
 import dev.hearthd.android.kiosk.dashboard.LocalLightCommander
 import dev.hearthd.android.kiosk.nowplaying.LocalNowPlaying
 import dev.hearthd.android.kiosk.nowplaying.NowPlayingService
 import dev.hearthd.android.kiosk.settings.HearthdSettings
+import dev.hearthd.android.kiosk.service.KioskService
 import dev.hearthd.android.kiosk.settings.ManagedSettingsController
-import dev.hearthd.android.kiosk.settings.SettingsRepository
 import dev.hearthd.android.kiosk.settings.VoiceSettings
 import dev.hearthd.android.kiosk.snapcast.SnapcastController
 import dev.hearthd.android.kiosk.snapcast.SnapcastNowPlaying
@@ -79,11 +78,16 @@ class MainActivity : ComponentActivity() {
         hideSystemBars()
         micPermission.value = hasMicPermission()
 
-        val settingsRepo = SettingsRepository(applicationContext)
+        // Shared with KioskService, which keeps them moving while the panel is
+        // dark, so they must be the same instances the service polls into.
+        val app = application as KioskApp
+        val settingsRepo = app.settings
+        val dashboard = app.dashboard
+        KioskService.start(this)
+
         val controller = UpdateController(applicationContext)
         val wakeWord = WakeWordDetector(applicationContext)
         val voice = VoiceController(lifecycleScope)
-        val dashboard = DashboardController()
         val snapcast = SnapcastController(applicationContext)
         val volumeSync = SnapcastVolumeSync(applicationContext)
         // What's playing, read from the same Snapcast server. Demand-driven
@@ -139,25 +143,6 @@ class MainActivity : ComponentActivity() {
                             else -> wakeWord.run(s.model, s.threshold)
                         }
                     }
-            }
-        }
-
-        // The dashboard poll loop, on the same foreground-only, opt-in footing as
-        // updates: it fetches nothing until enabled and a URL is set. The server
-        // dictates the cadence (poll() returns the seconds to wait); collectLatest
-        // restarts the loop on settings change, and clears the surface when off.
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                settingsRepo.dashboard.collectLatest { s ->
-                    if (!s.enabled || !s.configured) {
-                        dashboard.clear()
-                        return@collectLatest
-                    }
-                    while (true) {
-                        val waitSeconds = dashboard.poll(s.stateUrl)
-                        delay(waitSeconds.toLong() * 1_000L)
-                    }
-                }
             }
         }
 
