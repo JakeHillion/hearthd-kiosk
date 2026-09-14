@@ -32,8 +32,18 @@ data class DashboardUiState(
  *
  * Content addressing gives integrity for free: the fetched template body is
  * verified against the requested sha256 before it's parsed.
+ *
+ * This is the kiosk's only reader of `/state`. The template body carries both
+ * the widget tree and the `settings` blob that template control persists, so a
+ * second poller for the settings would be fetching bytes this one already has,
+ * on a lifetime of its own — [onTemplate] hands the verified body to that
+ * consumer instead. Hash-gating the body fetch is safe for it too: the document
+ * is content-addressed, so an unchanged hash means unchanged settings.
  */
-class DashboardController {
+class DashboardController(
+    private val onTemplate: suspend (json: String, refreshIntervalSeconds: Int) -> Unit =
+        { _, _ -> },
+) {
     private val templates = TemplateClient()
     private val runLock = Mutex()
 
@@ -49,44 +59,62 @@ class DashboardController {
     @Volatile
     private var lastStateUrl: String? = null
 
+    // The verified body behind the held template, kept so a consumer can be
+    // handed it on every poll rather than only when the hash moves. Tracked
+    // separately from the published state, which a settings-only poll leaves
+    // untouched.
+    private var templateJson: String? = null
+    private var lastHash: String? = null
+
     /**
      * Run one poll cycle against [stateUrl]. Returns the number of seconds to
      * wait before the next call: the server's clamped `refresh_interval` on
      * success, or a growing backoff on failure.
      */
-    suspend fun poll(stateUrl: String): Int = runLock.withLock {
+    suspend fun poll(stateUrl: String, publish: Boolean = true): Int = runLock.withLock {
         lastStateUrl = stateUrl
-        if (_state.value.template == null) {
+        if (publish && _state.value.template == null) {
             _state.update { it.copy(status = DashboardStatus.LOADING) }
         }
         try {
             val response = templates.fetchState(stateUrl)
-            val current = _state.value
-            // Reuse the held template while its hash is unchanged; otherwise fetch
-            // and verify the new body and swap the single slot.
-            val template =
-                if (response.templateHash == current.templateHash && current.template != null) {
-                    current.template
-                } else {
-                    Template.fromJson(templates.fetchTemplateJson(stateUrl, response.templateHash))
-                }
+            // Reuse the held body while its hash is unchanged; otherwise fetch
+            // and verify the new one and swap the single slot.
+            val json = templateJson.takeIf { it != null && response.templateHash == lastHash }
+                ?: templates.fetchTemplateJson(stateUrl, response.templateHash)
+            templateJson = json
+            lastHash = response.templateHash
             val interval = response.refreshIntervalSeconds
                 .coerceIn(MIN_REFRESH_SECONDS, MAX_REFRESH_SECONDS)
-            _state.update {
-                it.copy(
-                    status = DashboardStatus.LIVE,
-                    templateHash = response.templateHash,
-                    template = template,
-                    state = response.state,
-                    refreshIntervalSeconds = interval,
-                    lastUpdatedEpochMs = System.currentTimeMillis(),
-                    message = null,
-                )
+            // Settings come from the verified body alone, so a template the
+            // dashboard can't draw still applies them.
+            onTemplate(json, interval)
+            if (publish) {
+                val current = _state.value
+                val template =
+                    if (response.templateHash == current.templateHash && current.template != null) {
+                        current.template
+                    } else {
+                        Template.fromJson(json)
+                    }
+                _state.update {
+                    it.copy(
+                        status = DashboardStatus.LIVE,
+                        templateHash = response.templateHash,
+                        template = template,
+                        state = response.state,
+                        refreshIntervalSeconds = interval,
+                        lastUpdatedEpochMs = System.currentTimeMillis(),
+                        message = null,
+                    )
+                }
             }
             backoffSeconds = MIN_BACKOFF_SECONDS
             interval
         } catch (e: Exception) {
-            _state.update { it.copy(status = DashboardStatus.ERROR, message = e.message) }
+            if (publish) {
+                _state.update { it.copy(status = DashboardStatus.ERROR, message = e.message) }
+            }
             val wait = backoffSeconds
             backoffSeconds = (backoffSeconds * 2).coerceAtMost(MAX_BACKOFF_SECONDS)
             wait
@@ -97,6 +125,8 @@ class DashboardController {
     fun clear() {
         backoffSeconds = MIN_BACKOFF_SECONDS
         lastStateUrl = null
+        templateJson = null
+        lastHash = null
         _state.value = DashboardUiState()
     }
 

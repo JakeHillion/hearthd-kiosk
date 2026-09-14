@@ -1,6 +1,5 @@
 package dev.hearthd.android.kiosk.settings
 
-import dev.hearthd.android.kiosk.dashboard.TemplateClient
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,70 +19,56 @@ data class ManagedUiState(
 )
 
 /**
- * Polls the template `/state` URL and hands its top-level `settings` blob to
- * [saveConfig], which persists it for [SettingsRepository]'s overlay to read.
- * Mirrors [dev.hearthd.android.kiosk.dashboard.DashboardController]: one run at a
- * time via [runLock], progress exposed as a [StateFlow], gentle backoff on
- * failure. Template integrity (sha256) is verified by [TemplateClient].
+ * Takes the template body the dashboard poll already fetched and persists its
+ * top-level `settings` blob via [saveConfig], for [SettingsRepository]'s overlay
+ * to read.
  *
- * A template with no `settings` key still counts as a successful poll — it stores
- * an empty blob, so every managed domain falls back to its built-in default.
+ * A consumer rather than a poller: the settings live in the same
+ * content-addressed document as the widget tree, so fetching them again would
+ * mean a second request for bytes the kiosk already holds — and, since the
+ * dashboard poll moved to the service, a second *lifetime* too, leaving live
+ * state and stale settings read from one document.
+ *
+ * [state] therefore reports on the settings handling alone. A failed poll is the
+ * dashboard's error to show; here it simply means [lastUpdatedEpochMs] stops
+ * advancing, which is what staleness looks like.
+ *
+ * A template with no `settings` key still counts as success — it stores an empty
+ * blob, so every managed domain falls back to its built-in default.
  */
 class ManagedSettingsController(
     private val saveConfig: suspend (String) -> Unit,
 ) {
-    private val templates = TemplateClient()
     private val runLock = Mutex()
 
     private val _state = MutableStateFlow(ManagedUiState())
     val state: StateFlow<ManagedUiState> = _state.asStateFlow()
 
-    private var backoffSeconds = MIN_BACKOFF_SECONDS
-
     /**
-     * Run one poll against [stateUrl]. Returns seconds to wait before the next
-     * call: the server's clamped `refresh_interval` on success, else a growing
-     * backoff.
+     * Persist the `settings` blob out of an already-verified [templateJson].
+     * [refreshIntervalSeconds] is the dashboard's cadence, carried through only
+     * so the Managed pane can show how often this is refreshed.
      */
-    suspend fun poll(stateUrl: String): Int = runLock.withLock {
-        if (_state.value.status == ManagedStatus.IDLE) {
-            _state.update { it.copy(status = ManagedStatus.LOADING) }
-        }
+    suspend fun accept(templateJson: String, refreshIntervalSeconds: Int) = runLock.withLock {
         try {
-            val response = templates.fetchState(stateUrl)
-            val templateJson = templates.fetchTemplateJson(stateUrl, response.templateHash)
             val settings = JSONObject(templateJson).optJSONObject("settings") ?: JSONObject()
             saveConfig(settings.toString())
-            val interval = response.refreshIntervalSeconds
-                .coerceIn(MIN_REFRESH_SECONDS, MAX_REFRESH_SECONDS)
             _state.update {
                 it.copy(
                     status = ManagedStatus.LIVE,
-                    refreshIntervalSeconds = interval,
+                    refreshIntervalSeconds = refreshIntervalSeconds,
                     lastUpdatedEpochMs = System.currentTimeMillis(),
                     message = null,
                 )
             }
-            backoffSeconds = MIN_BACKOFF_SECONDS
-            interval
         } catch (e: Exception) {
+            // A body that parses as a template but whose settings won't store.
             _state.update { it.copy(status = ManagedStatus.ERROR, message = e.message) }
-            val wait = backoffSeconds
-            backoffSeconds = (backoffSeconds * 2).coerceAtMost(MAX_BACKOFF_SECONDS)
-            wait
         }
     }
 
     /** Reset status when template control is turned off. The cached blob stays. */
     fun clear() {
-        backoffSeconds = MIN_BACKOFF_SECONDS
         _state.value = ManagedUiState()
-    }
-
-    companion object {
-        private const val MIN_REFRESH_SECONDS = 2
-        private const val MAX_REFRESH_SECONDS = 3600
-        private const val MIN_BACKOFF_SECONDS = 5
-        private const val MAX_BACKOFF_SECONDS = 60
     }
 }
