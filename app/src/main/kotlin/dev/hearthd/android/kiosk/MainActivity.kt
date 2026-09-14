@@ -31,7 +31,6 @@ import dev.hearthd.android.kiosk.nowplaying.LocalNowPlaying
 import dev.hearthd.android.kiosk.nowplaying.NowPlayingService
 import dev.hearthd.android.kiosk.settings.HearthdSettings
 import dev.hearthd.android.kiosk.service.KioskService
-import dev.hearthd.android.kiosk.settings.ManagedSettingsController
 import dev.hearthd.android.kiosk.settings.VoiceSettings
 import dev.hearthd.android.kiosk.snapcast.SnapcastController
 import dev.hearthd.android.kiosk.snapcast.SnapcastNowPlaying
@@ -83,6 +82,7 @@ class MainActivity : ComponentActivity() {
         val app = application as KioskApp
         val settingsRepo = app.settings
         val dashboard = app.dashboard
+        val managed = app.managed
         KioskService.start(this)
 
         val controller = UpdateController(applicationContext)
@@ -97,11 +97,6 @@ class MainActivity : ComponentActivity() {
         val snapcastNowPlaying =
             SnapcastNowPlaying(applicationContext, lifecycleScope, settingsRepo.snapcast)
         val nowPlaying = NowPlayingService(lifecycleScope, listOf(snapcastNowPlaying))
-        // Template control: polls a remote template and persists its `settings`
-        // blob, which SettingsRepository overlays over the local domains.
-        val managed = ManagedSettingsController(
-            saveConfig = { settingsRepo.setManagedCache(it) },
-        )
         // Light control (write path): commands go straight to hearthd, then nudge
         // a dashboard re-poll so the change is confirmed without waiting a cycle.
         val lightCommander = LightController(
@@ -143,30 +138,6 @@ class MainActivity : ComponentActivity() {
                             else -> wakeWord.run(s.model, s.threshold)
                         }
                     }
-            }
-        }
-
-        // Template control: when enabled and the dashboard `/state` URL is set,
-        // poll that same URL and persist the template's `settings` blob. The
-        // dashboard URL is the address the device is pointed at, so it's the
-        // template source too — no separate URL. Same foreground-only, opt-in,
-        // collectLatest footing as the loops above; the server dictates the
-        // cadence. Off, it resets status and the persisted blob is no longer
-        // overlaid.
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                combine(settingsRepo.managedEnabled, settingsRepo.dashboard) { enabled, dash ->
-                    enabled to dash.stateUrl
-                }.collectLatest { (enabled, stateUrl) ->
-                    if (!enabled || stateUrl.isBlank()) {
-                        managed.clear()
-                        return@collectLatest
-                    }
-                    while (true) {
-                        val waitSeconds = managed.poll(stateUrl)
-                        delay(waitSeconds.toLong() * 1_000L)
-                    }
-                }
             }
         }
 

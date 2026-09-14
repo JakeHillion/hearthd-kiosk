@@ -21,6 +21,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 /**
@@ -54,7 +55,7 @@ class KioskService : Service() {
     override fun onCreate() {
         super.onCreate()
         startForeground()
-        runDashboardPoll()
+        runStatePoll()
     }
 
     // Restarted by the system if the process is reclaimed; redelivery isn't
@@ -69,20 +70,29 @@ class KioskService : Service() {
     }
 
     /**
-     * Poll `/state` for as long as the dashboard is enabled and configured. The
-     * server dictates the cadence (poll() returns the seconds to wait) and
-     * collectLatest restarts the loop when settings change, clearing the held
-     * template when the dashboard is switched off.
+     * The one `/state` poll. It serves the dashboard and template control alike,
+     * since both read the same content-addressed document — so it runs while
+     * either wants it, and only publishes a dashboard when the dashboard is on.
+     *
+     * The server dictates the cadence (poll() returns the seconds to wait) and
+     * collectLatest restarts the loop when settings change, clearing whatever is
+     * held when both consumers are switched off.
      */
-    private fun runDashboardPoll() {
+    private fun runStatePoll() {
         scope.launch {
-            app.settings.dashboard.collectLatest { s ->
-                if (!s.enabled || !s.configured) {
+            combine(
+                app.settings.dashboard,
+                app.settings.managedEnabled,
+            ) { dash, managed -> dash to managed }.collectLatest { (dash, managed) ->
+                if (!dash.configured || (!dash.enabled && !managed)) {
                     app.dashboard.clear()
+                    app.managed.clear()
                     return@collectLatest
                 }
+                if (!dash.enabled) app.dashboard.clear()
+                if (!managed) app.managed.clear()
                 while (true) {
-                    val waitSeconds = app.dashboard.poll(s.stateUrl)
+                    val waitSeconds = app.dashboard.poll(dash.stateUrl, publish = dash.enabled)
                     delay(waitSeconds.toLong() * 1_000L)
                 }
             }
