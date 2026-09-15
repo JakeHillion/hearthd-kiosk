@@ -13,10 +13,23 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
+        uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+            extra-substituters = https://nixcache.hearthd.dev
+            extra-trusted-public-keys = nixcache.hearthd.dev-1:nDKId0zqk7popcBT1tHB9j3nAGU3meWFuJjWzVKab/o=
 
-      - name: Set up Magic Nix Cache
-        uses: DeterminateSystems/magic-nix-cache-action@55718cd9ebf1737a061487d5ada21abf31e99a98 # main
+      - name: Setup Nix S3 cache
+        uses: testquorum/nix-s3-generations@45aa2ff2b0df67b5f48a1b710c574c754f08a0c7 # v0.1.4
+        with:
+          s3-endpoint: https://28e45df51086264c6d9cf2b5e6ecc190.r2.cloudflarestorage.com
+          bucket: hearthd-nix
+          public-key: nixcache.hearthd.dev-1:nDKId0zqk7popcBT1tHB9j3nAGU3meWFuJjWzVKab/o=
+          private-key: ${{ secrets.NIX_SIGNING_KEY }}
+          region: auto
+          aws-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
 
       # Builds the APK and runs Android Lint (both are flake checks).
       - name: nix flake check
