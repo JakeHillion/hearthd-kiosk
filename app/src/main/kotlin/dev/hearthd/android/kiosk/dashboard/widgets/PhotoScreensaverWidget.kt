@@ -385,7 +385,9 @@ private fun NowPlayingOverlay(nowPlaying: NowPlaying, modifier: Modifier = Modif
             AsyncImage(
                 model = it,
                 contentDescription = null,
-                contentScale = ContentScale.Crop,
+                // Fit keeps the artwork at its own aspect ratio inside the
+                // square box rather than cropping it down to it.
+                contentScale = ContentScale.Fit,
                 modifier = Modifier.size(NOW_PLAYING_ART_SIZE * scale).clip(RoundedCornerShape(8.dp)),
             )
         }
