@@ -56,6 +56,8 @@ class KioskService : Service() {
         super.onCreate()
         startForeground()
         runStatePoll()
+        runSnapcast()
+        runVolumeSync()
     }
 
     // Restarted by the system if the process is reclaimed; redelivery isn't
@@ -95,6 +97,47 @@ class KioskService : Service() {
                     val waitSeconds = app.dashboard.poll(dash.stateUrl, publish = dash.enabled)
                     delay(waitSeconds.toLong() * 1_000L)
                 }
+            }
+        }
+    }
+
+    /**
+     * The snapclient subprocess. Audio is the clearest case for this lifetime:
+     * the client is one room of a sample-locked multi-room stream, so a panel
+     * that sleeps used to drop its room out of the house until someone touched
+     * it — the process is killed with the coroutine that spawned it.
+     *
+     * collectLatest is what stops and restarts the client across a settings
+     * change, and the opt-in gate keeps an unconfigured device from spawning
+     * anything at all.
+     */
+    private fun runSnapcast() {
+        scope.launch {
+            app.settings.snapcast.collectLatest { s ->
+                if (!s.enabled || !s.configured) {
+                    app.snapcast.markDisabled()
+                    return@collectLatest
+                }
+                app.snapcast.run(s)
+            }
+        }
+    }
+
+    /**
+     * Volume sync with the same server, on its own opt-in and its own socket.
+     * It belongs on this lifetime for the same reason the client does, and more
+     * sharply: with sync on, the client runs `--mixer none` and this link *is*
+     * the mixer, so a dark panel used to ignore the server's volume entirely
+     * while still playing at whatever level it was left at.
+     */
+    private fun runVolumeSync() {
+        scope.launch {
+            app.settings.snapcast.collectLatest { s ->
+                if (!s.enabled || !s.configured || !s.volumeSync) {
+                    app.volumeSync.markDisabled()
+                    return@collectLatest
+                }
+                app.volumeSync.run(s)
             }
         }
     }

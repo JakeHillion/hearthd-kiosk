@@ -4,6 +4,8 @@ import android.app.Application
 import dev.hearthd.android.kiosk.dashboard.DashboardController
 import dev.hearthd.android.kiosk.settings.ManagedSettingsController
 import dev.hearthd.android.kiosk.settings.SettingsRepository
+import dev.hearthd.android.kiosk.snapcast.SnapcastController
+import dev.hearthd.android.kiosk.snapcast.SnapcastVolumeSync
 import kotlinx.coroutines.flow.first
 
 /**
@@ -45,4 +47,14 @@ class KioskApp : Application() {
             },
         )
     }
+
+    /** The snapclient subprocess, and this device's half of the multi-room stream. */
+    val snapcast: SnapcastController by lazy { SnapcastController(this) }
+
+    /**
+     * The link that makes the device's music stream the server's mixer. Separate
+     * from [snapcast] because the server can be given the volume without the
+     * client running, and because it is its own opt-in.
+     */
+    val volumeSync: SnapcastVolumeSync by lazy { SnapcastVolumeSync(this) }
 }
