@@ -32,9 +32,7 @@ import dev.hearthd.android.kiosk.nowplaying.NowPlayingService
 import dev.hearthd.android.kiosk.settings.HearthdSettings
 import dev.hearthd.android.kiosk.service.KioskService
 import dev.hearthd.android.kiosk.settings.VoiceSettings
-import dev.hearthd.android.kiosk.snapcast.SnapcastController
 import dev.hearthd.android.kiosk.snapcast.SnapcastNowPlaying
-import dev.hearthd.android.kiosk.snapcast.SnapcastVolumeSync
 import dev.hearthd.android.kiosk.ui.KioskScreen
 import dev.hearthd.android.kiosk.ui.SettingsScreen
 import dev.hearthd.android.kiosk.ui.theme.kioskTypography
@@ -77,23 +75,24 @@ class MainActivity : ComponentActivity() {
         hideSystemBars()
         micPermission.value = hasMicPermission()
 
-        // Shared with KioskService, which keeps them moving while the panel is
-        // dark, so they must be the same instances the service polls into.
+        // Shared with KioskService, which keeps them running while the panel is
+        // dark, so they must be the same instances the service drives.
         val app = application as KioskApp
         val settingsRepo = app.settings
         val dashboard = app.dashboard
         val managed = app.managed
+        val snapcast = app.snapcast
+        val volumeSync = app.volumeSync
         KioskService.start(this)
 
         val controller = UpdateController(applicationContext)
         val wakeWord = WakeWordDetector(applicationContext)
         val voice = VoiceController(lifecycleScope)
-        val snapcast = SnapcastController(applicationContext)
-        val volumeSync = SnapcastVolumeSync(applicationContext)
         // What's playing, read from the same Snapcast server. Demand-driven
-        // rather than a foreground loop like the controllers below: it connects
-        // only while something on screen is actually showing a track, so it
-        // needs no wiring here beyond being handed to the things that read it.
+        // rather than run from the service like the client and volume sync: it
+        // connects only while something on screen is actually showing a track,
+        // so it needs no wiring here beyond being handed to the things that
+        // read it.
         val snapcastNowPlaying =
             SnapcastNowPlaying(applicationContext, lifecycleScope, settingsRepo.snapcast)
         val nowPlaying = NowPlayingService(lifecycleScope, listOf(snapcastNowPlaying))
@@ -138,37 +137,6 @@ class MainActivity : ComponentActivity() {
                             else -> wakeWord.run(s.model, s.threshold)
                         }
                     }
-            }
-        }
-
-        // Snapcast client: when enabled + configured, spawn the
-        // bundled snapclient against the server. Foreground-only and opt-in like
-        // the loops above — collectLatest tears the process down (releasing audio)
-        // the instant settings change or the app leaves the screen.
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                settingsRepo.snapcast.collectLatest { s ->
-                    if (!s.enabled || !s.configured) {
-                        snapcast.markDisabled()
-                        return@collectLatest
-                    }
-                    snapcast.run(s)
-                }
-            }
-        }
-
-        // Volume sync with the same server, on the same footing as the client
-        // above and gated by its own opt-in: the control-port link is up only
-        // while the client is on and the server has been given the volume.
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                settingsRepo.snapcast.collectLatest { s ->
-                    if (!s.enabled || !s.configured || !s.volumeSync) {
-                        volumeSync.markDisabled()
-                        return@collectLatest
-                    }
-                    volumeSync.run(s)
-                }
             }
         }
 
