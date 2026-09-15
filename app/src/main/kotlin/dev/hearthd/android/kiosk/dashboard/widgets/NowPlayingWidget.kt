@@ -102,9 +102,10 @@ data class NowPlayingWidget(
                 AsyncImage(
                     model = it,
                     contentDescription = null,
-                    contentScale = ContentScale.Crop,
+                    contentScale = ContentScale.Fit,
                     // Square, and never taller than the room left over once the
-                    // text and transport row have taken theirs.
+                    // text and transport row have taken theirs. Fit keeps the
+                    // artwork at its own aspect ratio inside that box.
                     modifier = Modifier
                         .weight(1f, fill = false)
                         .aspectRatio(1f)
