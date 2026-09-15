@@ -1,6 +1,15 @@
 {
   description = "hearthd-kiosk";
 
+  nixConfig = {
+    extra-substituters = [
+      "https://nixcache.hearthd.dev"
+    ];
+    extra-trusted-public-keys = [
+      "nixcache.hearthd.dev-1:nDKId0zqk7popcBT1tHB9j3nAGU3meWFuJjWzVKab/o="
+    ];
+  };
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
