@@ -277,12 +277,15 @@ class SnapcastNowPlaying(
                 // shows the properties flattened alongside the id instead, so
                 // accept that shape too.
                 val properties = params.optJSONObject("properties") ?: params
-                // A partial update carries no metadata, and the server enriches
-                // it with what it already holds, so absent means unchanged. The
-                // transport properties are always complete, so they just replace.
+                // A partial update carries only the fields that changed, and the
+                // server enriches the rest from what it already holds. The metadata
+                // and transport halves are both merged over what we already had, so
+                // a playback-status-only update can't wipe the can-flags — and
+                // `canControl` in particular is what decides whether the widget
+                // offers the transport row at all.
                 link.copy(
                     metadata = nowPlayingOf(properties) ?: link.metadata,
-                    controls = controlsOf(properties),
+                    controls = controlsOf(properties, link.controls),
                 )
             }
             "Stream.OnUpdate" -> {
@@ -292,7 +295,7 @@ class SnapcastNowPlaying(
                 link.copy(
                     playing = stream.optString("status") == STATUS_PLAYING,
                     metadata = properties?.let { nowPlayingOf(it) } ?: link.metadata,
-                    controls = properties?.let { controlsOf(it) } ?: link.controls,
+                    controls = properties?.let { controlsOf(it, link.controls) } ?: link.controls,
                 )
             }
             // The whole server picture, sent when clients join or move groups.
@@ -355,8 +358,9 @@ class SnapcastNowPlaying(
 
 /**
  * The transport half of a stream's properties. Separate from the metadata
- * because the two update independently: a partial `Stream.OnProperties` replaces
- * these outright while the server carries the metadata forward.
+ * because the two update independently: a partial `Stream.OnProperties` updates
+ * only the fields it carries while the server carries the rest forward, so we
+ * merge over what we already held rather than replacing it outright.
  */
 private data class Controls(
     val playback: Playback? = null,
@@ -368,25 +372,35 @@ private data class Controls(
 )
 
 /**
- * What a stream's `properties` say its player will accept. A stream with no
- * player behind it — a bare pipe — reports none of this, which is exactly how a
- * consumer learns not to offer controls. `playbackStatus` is absent or "unknown"
- * in the same case, and stays null so the caller can fall back to whether audio
- * is flowing.
+ * What a stream's `properties` say its player will accept, overlaid on
+ * [previous]: a key the update carries wins, and a key it doesn't — a partial
+ * update, like the playback-status change a pause produces — keeps the value we
+ * already had. A bare pipe with no player behind it never carries any of these,
+ * so the defaults stay on the first read, which is exactly how a consumer learns
+ * not to offer controls. `playbackStatus` present but "unknown" still counts as
+ * no state, so the caller falls back to whether audio is flowing.
  */
-private fun controlsOf(properties: JSONObject) = Controls(
-    playback = when (properties.optString("playbackStatus")) {
-        "playing" -> Playback.PLAYING
-        "paused" -> Playback.PAUSED
-        "stopped" -> Playback.STOPPED
-        else -> null
-    },
-    canPlay = properties.optBoolean("canPlay"),
-    canPause = properties.optBoolean("canPause"),
-    canGoNext = properties.optBoolean("canGoNext"),
-    canGoPrevious = properties.optBoolean("canGoPrevious"),
-    canControl = properties.optBoolean("canControl"),
+private fun controlsOf(properties: JSONObject, previous: Controls = Controls()) = Controls(
+    playback = if (properties.has("playbackStatus")) {
+        when (properties.optString("playbackStatus")) {
+            "playing" -> Playback.PLAYING
+            "paused" -> Playback.PAUSED
+            "stopped" -> Playback.STOPPED
+            // Present but not a state we know: leave it for the caller to fall
+            // back to whether audio is flowing.
+            else -> null
+        }
+    } else previous.playback,
+    canPlay = properties.optBooleanIfPresent("canPlay", previous.canPlay),
+    canPause = properties.optBooleanIfPresent("canPause", previous.canPause),
+    canGoNext = properties.optBooleanIfPresent("canGoNext", previous.canGoNext),
+    canGoPrevious = properties.optBooleanIfPresent("canGoPrevious", previous.canGoPrevious),
+    canControl = properties.optBooleanIfPresent("canControl", previous.canControl),
 )
+
+/** [properties]'s [key] as a boolean, or [fallback] when the key is absent. */
+private fun JSONObject.optBooleanIfPresent(key: String, fallback: Boolean): Boolean =
+    if (has(key)) optBoolean(key) else fallback
 
 /** The `Stream.Control` params for one command against [streamId]. */
 private fun controlParams(streamId: String, command: String): JSONObject = JSONObject()
