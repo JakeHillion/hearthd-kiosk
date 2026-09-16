@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -131,13 +132,7 @@ data class PhotoScreensaverWidget(
                     ),
             )
 
-            Overlay(state)
-            nowPlaying?.takeIf { it.playback == Playback.PLAYING }?.let {
-                NowPlayingOverlay(
-                    it,
-                    Modifier.align(Alignment.BottomEnd).padding(32.dp),
-                )
-            }
+            Overlay(state, nowPlaying)
         }
     }
 
@@ -236,9 +231,16 @@ data class PhotoScreensaverWidget(
         )
     }
 
-    /** Date and time bottom-left, weather to its right. Fixed layout. */
+    /**
+     * The bottom strip: date over time bottom-left, weather to the right, and
+     * what's playing opposite. The time, temperature, and artist/album text
+     * bottoms all sit on one baseline line. Box-bottom alignment can't do that
+     * — the displayMedium time has far more
+     * line-height space below its baseline than the smaller texts, so its box
+     * bottom sits lower than the visible glyphs.
+     */
     @Composable
-    private fun BoxScope.Overlay(state: JSONObject) {
+    private fun BoxScope.Overlay(state: JSONObject, nowPlaying: NowPlaying?) {
         val zoneId = timezone.resolveString(state)
         val zone = remember(zoneId) {
             runCatching { ZoneId.of(zoneId) }.getOrDefault(ZoneId.systemDefault())
@@ -253,38 +255,72 @@ data class PhotoScreensaverWidget(
             }
         }
 
-        Row(
-            modifier = Modifier.align(Alignment.BottomStart).padding(32.dp),
-            verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.spacedBy(24.dp),
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .padding(32.dp),
         ) {
-            Column {
-                Text(
-                    text = now.format(dateFormat),
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = Color.White,
-                )
-                Text(
-                    text = now.format(timeFormat),
-                    style = MaterialTheme.typography.displayMedium,
-                    color = Color.White,
-                )
-            }
+            // The date lives on its own row above the shared baseline row, so it
+            // never participates in the alignment below. A Column's reported
+            // baseline is its first child's, so folding the date in would pull
+            // the weather up onto the date instead of the time.
+            Text(
+                text = now.format(dateFormat),
+                style = MaterialTheme.typography.headlineSmall,
+                color = Color.White,
+            )
 
-            val data = weather.resolveObject(state)
-            val tempC = data?.optDouble("temp_c")?.takeUnless { it.isNaN() }
-            val condition = data?.optString("condition").orEmpty()
-            if (tempC != null || condition.isNotBlank()) {
+            // The shared baseline row: clock+weather on the left, now-playing
+            // at the far right. The clock and weather are baseline-aligned as
+            // siblings, and that cluster's baseline is what the now-playing
+            // block aligns to - so the time, temperature, and artist/album
+            // glyph bottoms share one line despite the mixed font sizes and the
+            // displayMedium line-height padding.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                // Clock and weather together on the left; their shared baseline
+                // becomes this row's own baseline, which the now-playing block
+                // below then aligns to from the far side.
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.alignByBaseline(),
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(24.dp),
                 ) {
-                    Text(conditionGlyph(condition), style = MaterialTheme.typography.headlineSmall)
                     Text(
-                        text = tempC?.let { "${it.roundToInt()}°" } ?: "—",
-                        style = MaterialTheme.typography.headlineSmall,
+                        text = now.format(timeFormat),
+                        style = MaterialTheme.typography.displayMedium,
                         color = Color.White,
+                        modifier = Modifier.alignByBaseline(),
                     )
+
+                    val data = weather.resolveObject(state)
+                    val tempC = data?.optDouble("temp_c")?.takeUnless { it.isNaN() }
+                    val condition = data?.optString("condition").orEmpty()
+                    if (tempC != null || condition.isNotBlank()) {
+                        Row(
+                            modifier = Modifier.alignByBaseline(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(conditionGlyph(condition), style = MaterialTheme.typography.headlineSmall)
+                            Text(
+                                text = tempC?.let { "${it.roundToInt()}°" } ?: "—",
+                                style = MaterialTheme.typography.headlineSmall,
+                                color = Color.White,
+                            )
+                        }
+                    }
+                }
+
+                // Now-playing hugs the bottom-right of the same line.
+                nowPlaying?.takeIf { it.playback == Playback.PLAYING }?.let {
+                    // The block's top-level Row baseline is the artist/album
+                    // line, so this pins it to the time and temperature.
+                    NowPlayingOverlay(it, Modifier.alignByBaseline())
                 }
             }
         }
@@ -342,6 +378,11 @@ private fun rememberOverlayScale(): Float {
  * and weather do on the other side. The text is bounded and clipped to one line
  * each: a long title must not run back across the photo into the clock. Every
  * size is multiplied by [rememberOverlayScale] so it grows with the panel.
+ *
+ * The whole block's top-level [Row] baseline is the artist/album (last) line,
+ * so a caller that wants that label sitting on the same line as the clock and
+ * weather passes `Modifier.alignByBaseline()` in [modifier] — the same mechanic
+ * the clock and weather rows themselves use.
  */
 @Composable
 private fun NowPlayingOverlay(nowPlaying: NowPlaying, modifier: Modifier = Modifier) {
@@ -349,7 +390,7 @@ private fun NowPlayingOverlay(nowPlaying: NowPlaying, modifier: Modifier = Modif
     val scale = rememberOverlayScale()
     Row(
         modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Bottom,
         horizontalArrangement = Arrangement.spacedBy(16.dp * scale),
     ) {
         Column(
