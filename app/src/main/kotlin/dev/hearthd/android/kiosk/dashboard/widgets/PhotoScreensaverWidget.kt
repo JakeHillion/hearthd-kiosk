@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -28,6 +29,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LastBaseline
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -131,13 +133,7 @@ data class PhotoScreensaverWidget(
                     ),
             )
 
-            Overlay(state)
-            nowPlaying?.takeIf { it.playback == Playback.PLAYING }?.let {
-                NowPlayingOverlay(
-                    it,
-                    Modifier.align(Alignment.BottomEnd).padding(32.dp),
-                )
-            }
+            Overlay(state, nowPlaying)
         }
     }
 
@@ -236,9 +232,16 @@ data class PhotoScreensaverWidget(
         )
     }
 
-    /** Date and time bottom-left, weather to its right. Fixed layout. */
+    /**
+     * The bottom bar: date and time at the left, weather beside it, what's
+     * playing opposite. Every block hangs from the same [LastBaseline], so the
+     * last line of each one — the time, the temperature, and the track's
+     * subtitle — sits on one baseline running across the frame, however far
+     * their type sizes differ. Aligning the boxes instead would only line up
+     * their descender space, which drifts with the font size.
+     */
     @Composable
-    private fun BoxScope.Overlay(state: JSONObject) {
+    private fun BoxScope.Overlay(state: JSONObject, nowPlaying: NowPlaying?) {
         val zoneId = timezone.resolveString(state)
         val zone = remember(zoneId) {
             runCatching { ZoneId.of(zoneId) }.getOrDefault(ZoneId.systemDefault())
@@ -254,38 +257,57 @@ data class PhotoScreensaverWidget(
         }
 
         Row(
-            modifier = Modifier.align(Alignment.BottomStart).padding(32.dp),
-            verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.spacedBy(24.dp),
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .padding(32.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Column {
-                Text(
-                    text = now.format(dateFormat),
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = Color.White,
-                )
-                Text(
-                    text = now.format(timeFormat),
-                    style = MaterialTheme.typography.displayMedium,
-                    color = Color.White,
-                )
-            }
-
-            val data = weather.resolveObject(state)
-            val tempC = data?.optDouble("temp_c")?.takeUnless { it.isNaN() }
-            val condition = data?.optString("condition").orEmpty()
-            if (tempC != null || condition.isNotBlank()) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(conditionGlyph(condition), style = MaterialTheme.typography.headlineSmall)
+            Row(
+                modifier = Modifier.alignBy(LastBaseline),
+                horizontalArrangement = Arrangement.spacedBy(24.dp),
+            ) {
+                Column(modifier = Modifier.alignBy(LastBaseline)) {
                     Text(
-                        text = tempC?.let { "${it.roundToInt()}°" } ?: "—",
+                        text = now.format(dateFormat),
                         style = MaterialTheme.typography.headlineSmall,
                         color = Color.White,
                     )
+                    Text(
+                        text = now.format(timeFormat),
+                        style = MaterialTheme.typography.displayMedium,
+                        color = Color.White,
+                    )
                 }
+
+                val data = weather.resolveObject(state)
+                val tempC = data?.optDouble("temp_c")?.takeUnless { it.isNaN() }
+                val condition = data?.optString("condition").orEmpty()
+                if (tempC != null || condition.isNotBlank()) {
+                    Row(
+                        modifier = Modifier.alignBy(LastBaseline),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        // The emoji comes from the fallback font, whose metrics
+                        // differ from the label's; share their baseline rather
+                        // than centring one against the other.
+                        Text(
+                            text = conditionGlyph(condition),
+                            style = MaterialTheme.typography.headlineSmall,
+                            modifier = Modifier.alignByBaseline(),
+                        )
+                        Text(
+                            text = tempC?.let { "${it.roundToInt()}°" } ?: "—",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = Color.White,
+                            modifier = Modifier.alignByBaseline(),
+                        )
+                    }
+                }
+            }
+
+            nowPlaying?.takeIf { it.playback == Playback.PLAYING }?.let {
+                NowPlayingOverlay(it, Modifier.alignBy(LastBaseline))
             }
         }
     }
@@ -342,6 +364,10 @@ private fun rememberOverlayScale(): Float {
  * and weather do on the other side. The text is bounded and clipped to one line
  * each: a long title must not run back across the photo into the clock. Every
  * size is multiplied by [rememberOverlayScale] so it grows with the panel.
+ *
+ * The block grows upwards from the bottom line of its text: the cover's lower
+ * edge is pinned to that baseline, and the caller hangs the whole block from it
+ * too, so the subtitle lands on the clock's baseline whatever the cover's size.
  */
 @Composable
 private fun NowPlayingOverlay(nowPlaying: NowPlaying, modifier: Modifier = Modifier) {
@@ -349,12 +375,13 @@ private fun NowPlayingOverlay(nowPlaying: NowPlaying, modifier: Modifier = Modif
     val scale = rememberOverlayScale()
     Row(
         modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp * scale),
     ) {
         Column(
             horizontalAlignment = Alignment.End,
-            modifier = Modifier.widthIn(max = NOW_PLAYING_TEXT_WIDTH * scale),
+            modifier = Modifier
+                .alignBy(LastBaseline)
+                .widthIn(max = NOW_PLAYING_TEXT_WIDTH * scale),
         ) {
             nowPlaying.title?.let {
                 Text(
@@ -388,7 +415,10 @@ private fun NowPlayingOverlay(nowPlaying: NowPlaying, modifier: Modifier = Modif
                 // Fit keeps the artwork at its own aspect ratio inside the
                 // square box rather than cropping it down to it.
                 contentScale = ContentScale.Fit,
-                modifier = Modifier.size(NOW_PLAYING_ART_SIZE * scale).clip(RoundedCornerShape(8.dp)),
+                modifier = Modifier
+                    .alignBy { art -> art.measuredHeight }
+                    .size(NOW_PLAYING_ART_SIZE * scale)
+                    .clip(RoundedCornerShape(8.dp)),
             )
         }
     }
