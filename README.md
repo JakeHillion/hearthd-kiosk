@@ -59,11 +59,18 @@ a device with no screen lock set).
 
 The app can update itself in place from its release channel (opt in under
 **Settings → Updates**). It polls the channel manifest, verifies the APK's
-sha256, and installs it through `PackageInstaller`. Without device owner the
-system raises a "confirm install" prompt, which someone has to accept on the
-device.
+sha256, and installs it through `PackageInstaller`.
 
-Some devices need extra setup before this works at all — see below.
+From API 31 the install is unattended: an installer is allowed to update its own
+package without the "confirm install" prompt, which the app opts into with
+`UPDATE_PACKAGES_WITHOUT_USER_ACTION`. Device owner installs silently too. On
+anything older — the Portal included — the system raises the prompt and someone
+has to accept it on the device.
+
+A device's package verifier sits in front of all of this and can veto or
+interpose on the session however it was committed, so a device that should
+update unattended wants its verifier off: Play Protect scanning on a Samsung
+(Play Store → Play Protect → settings), and see below for the Portal.
 
 ## Device notes: Portal (2nd generation)
 

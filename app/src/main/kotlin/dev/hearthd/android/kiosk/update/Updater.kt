@@ -18,9 +18,10 @@ import java.security.MessageDigest
 /**
  * Fetches a channel manifest, downloads + verifies the APK, and installs it.
  *
- * Install uses a single [PackageInstaller] session for both paths: if the app
- * is the device owner the commit installs silently; otherwise the system raises
- * a confirm prompt (handled by [InstallStatusReceiver]).
+ * Install uses a single [PackageInstaller] session for every path. The commit
+ * is silent if the app is the device owner, and from API 31 if the update is
+ * one we install over ourselves; otherwise the system raises a confirm prompt
+ * (handled by [InstallStatusReceiver]).
  */
 class Updater(private val context: Context) {
     private val baseUrl = "https://assets.hearthd.dev/android/kiosk"
@@ -66,6 +67,12 @@ class Updater(private val context: Context) {
         // Tell the installer up front how much it needs so it can reserve the
         // space (and fail cleanly if it can't) rather than allocating blindly.
         params.setSize(apk.length())
+        // An installer updating its own package may skip the confirm prompt,
+        // given UPDATE_PACKAGES_WITHOUT_USER_ACTION. That is exactly what this
+        // is, so take it where the API exists; older devices keep prompting.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+        }
         val sessionId = installer.createSession(params)
         installer.openSession(sessionId).use { session ->
             session.openWrite("apk", 0, apk.length()).use { out ->
