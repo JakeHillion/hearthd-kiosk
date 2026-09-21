@@ -8,6 +8,10 @@
     <!-- Only used once the user opts in to wake-word detection. The mic is not
          essential to the kiosk, so a device without one can still install. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Lets the hardware volume keys drive the media stream volume directly, so
+         one place arbitrates music vs. the voice assistant. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-feature
         android:name="android.hardware.microphone"
         android:required="false" />
