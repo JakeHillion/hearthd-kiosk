@@ -26,6 +26,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import dev.hearthd.android.kiosk.dashboard.DashboardController
+import dev.hearthd.android.kiosk.dashboard.DeviceToken
 import dev.hearthd.android.kiosk.dashboard.LightController
 import dev.hearthd.android.kiosk.dashboard.LocalLightCommander
 import dev.hearthd.android.kiosk.nowplaying.LocalNowPlaying
@@ -64,6 +65,22 @@ class MainActivity : ComponentActivity() {
             micPermission.value = granted
         }
 
+    // This device's token, or null while the hardware serial it's derived from is
+    // unreadable. Tracked as a flow for the same reason as the mic permission: the
+    // poll loops restart on it, so identity lands as soon as it's granted rather
+    // than at the next app start.
+    private val deviceToken = MutableStateFlow<String?>(null)
+
+    // Whether the serial is readable at all, kept apart from [deviceToken] so the
+    // Device pane can tell "nobody has granted this yet" from "this platform won't
+    // hand over the serial" — both of which read as a null token.
+    private val deviceIdPermission = MutableStateFlow(false)
+
+    private val requestDeviceId =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            readDeviceToken()
+        }
+
     // Latest hearthd control settings, tracked so the light commander always
     // sends to the current URL (or drops the command when unconfigured).
     @Volatile
@@ -78,6 +95,7 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         hideSystemBars()
         micPermission.value = hasMicPermission()
+        readDeviceToken()
 
         val settingsRepo = SettingsRepository(applicationContext)
         val controller = UpdateController(applicationContext)
@@ -148,16 +166,17 @@ class MainActivity : ComponentActivity() {
         // restarts the loop on settings change, and clears the surface when off.
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                settingsRepo.dashboard.collectLatest { s ->
-                    if (!s.enabled || !s.configured) {
-                        dashboard.clear()
-                        return@collectLatest
+                combine(settingsRepo.dashboard, deviceToken) { s, token -> s to token }
+                    .collectLatest { (s, token) ->
+                        if (!s.enabled || !s.configured) {
+                            dashboard.clear()
+                            return@collectLatest
+                        }
+                        while (true) {
+                            val waitSeconds = dashboard.poll(s.stateUrl, token)
+                            delay(waitSeconds.toLong() * 1_000L)
+                        }
                     }
-                    while (true) {
-                        val waitSeconds = dashboard.poll(s.stateUrl)
-                        delay(waitSeconds.toLong() * 1_000L)
-                    }
-                }
             }
         }
 
@@ -170,15 +189,19 @@ class MainActivity : ComponentActivity() {
         // overlaid.
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                combine(settingsRepo.managedEnabled, settingsRepo.dashboard) { enabled, dash ->
-                    enabled to dash.stateUrl
-                }.collectLatest { (enabled, stateUrl) ->
+                combine(
+                    settingsRepo.managedEnabled,
+                    settingsRepo.dashboard,
+                    deviceToken,
+                ) { enabled, dash, token ->
+                    Triple(enabled, dash.stateUrl, token)
+                }.collectLatest { (enabled, stateUrl, token) ->
                     if (!enabled || stateUrl.isBlank()) {
                         managed.clear()
                         return@collectLatest
                     }
                     while (true) {
-                        val waitSeconds = managed.poll(stateUrl)
+                        val waitSeconds = managed.poll(stateUrl, token)
                         delay(waitSeconds.toLong() * 1_000L)
                     }
                 }
@@ -242,6 +265,8 @@ class MainActivity : ComponentActivity() {
                     // The kiosk surface is the root; Settings is reachable from
                     // its swipe-up tray and returns here on close.
                     var showSettings by rememberSaveable { mutableStateOf(false) }
+                    val deviceTokenValue by deviceToken.collectAsStateWithLifecycle()
+                    val deviceTokenGranted by deviceIdPermission.collectAsStateWithLifecycle()
                     if (showSettings) {
                         SettingsScreen(
                             settingsRepo = settingsRepo,
@@ -252,7 +277,10 @@ class MainActivity : ComponentActivity() {
                             volumeSync = volumeSync,
                             nowPlaying = snapcastNowPlaying,
                             managed = managed,
+                            deviceToken = deviceTokenValue,
+                            deviceTokenGranted = deviceTokenGranted,
                             onRequestMicPermission = { requestMic.launch(Manifest.permission.RECORD_AUDIO) },
+                            onRequestDeviceToken = { requestDeviceId.launch(DeviceToken.PERMISSION) },
                             onTestVoice = ::testVoiceConnection,
                             onClose = { showSettings = false },
                         )
@@ -280,8 +308,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // The permission may have changed while we were away (dialog, settings).
+        // Permissions may have changed while we were away (dialog, settings).
         micPermission.value = hasMicPermission()
+        readDeviceToken()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -297,6 +326,12 @@ class MainActivity : ComponentActivity() {
             HomeAssistantAuth(OkHttpClient(), settings.baseUrl).accessToken()
             "Connected — Home Assistant authorized this device"
         }.getOrElse { "Failed: ${it.message}" }
+
+    /** Re-read the device token and the permission it depends on. */
+    private fun readDeviceToken() {
+        deviceIdPermission.value = DeviceToken.granted(this)
+        deviceToken.value = DeviceToken.read(this)
+    }
 
     private fun hasMicPermission(): Boolean =
         ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==

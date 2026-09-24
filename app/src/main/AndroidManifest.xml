@@ -5,6 +5,14 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- Only used to derive this device's /state token from the hardware serial
+         (dashboard/DeviceToken.kt), and only once someone grants it from the
+         Device settings pane. The serial is the one per-device value that
+         outlives a factory reset, which is the whole reason the token is derived
+         from it rather than generated. Android 10 closed this off to
+         non-privileged apps; the supported hardware is API 28. -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+
     <!-- Only used once the user opts in to wake-word detection. The mic is not
          essential to the kiosk, so a device without one can still install. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />

@@ -44,23 +44,28 @@ class DashboardController {
     // when a poll throws, so a dead server is retried gently, not hammered.
     private var backoffSeconds = MIN_BACKOFF_SECONDS
 
-    // The last URL polled, so a command-triggered nudge can re-poll it without
-    // the caller having to thread the URL back through.
+    // What was last polled, so a command-triggered nudge can repeat it without
+    // the caller having to thread the URL and token back through. Held as one
+    // object so a nudge can never pair a new URL with a stale token.
     @Volatile
-    private var lastStateUrl: String? = null
+    private var lastPoll: PollTarget? = null
+
+    /** A `/state` poll's inputs: where to fetch, and who to say we are. */
+    private data class PollTarget(val stateUrl: String, val deviceToken: String?)
 
     /**
-     * Run one poll cycle against [stateUrl]. Returns the number of seconds to
-     * wait before the next call: the server's clamped `refresh_interval` on
-     * success, or a growing backoff on failure.
+     * Run one poll cycle against [stateUrl], identifying this device to the server
+     * with [deviceToken] when we have one. Returns the number of seconds to wait
+     * before the next call: the server's clamped `refresh_interval` on success, or
+     * a growing backoff on failure.
      */
-    suspend fun poll(stateUrl: String): Int = runLock.withLock {
-        lastStateUrl = stateUrl
+    suspend fun poll(stateUrl: String, deviceToken: String?): Int = runLock.withLock {
+        lastPoll = PollTarget(stateUrl, deviceToken)
         if (_state.value.template == null) {
             _state.update { it.copy(status = DashboardStatus.LOADING) }
         }
         try {
-            val response = templates.fetchState(stateUrl)
+            val response = templates.fetchState(stateUrl, deviceToken)
             val current = _state.value
             // Reuse the held template while its hash is unchanged; otherwise fetch
             // and verify the new body and swap the single slot.
@@ -96,17 +101,17 @@ class DashboardController {
     /** Drop the current template and state, e.g. when the dashboard is disabled. */
     fun clear() {
         backoffSeconds = MIN_BACKOFF_SECONDS
-        lastStateUrl = null
+        lastPoll = null
         _state.value = DashboardUiState()
     }
 
     /**
-     * Re-poll the last URL immediately, if we've polled at all. Used after a
+     * Re-poll the last target immediately, if we've polled at all. Used after a
      * light command so the confirmed state lands without waiting for the next
      * scheduled poll. No-op before the first poll or once cleared.
      */
     suspend fun refreshNow() {
-        lastStateUrl?.let { poll(it) }
+        lastPoll?.let { poll(it.stateUrl, it.deviceToken) }
     }
 
     companion object {

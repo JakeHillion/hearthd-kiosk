@@ -65,6 +65,21 @@ device.
 
 Some devices need extra setup before this works at all — see below.
 
+## Device identity
+
+`/state` identifies the device, so one server can serve a different dashboard to
+each display it feeds:
+
+    GET /state?device=a1b2c3d4e5f60718
+
+`/template/<sha256>` doesn't — the state response already named the template
+chosen for this device, so the content-addressed fetch stays cacheable.
+
+The token is derived from the hardware serial, so it survives a factory reset.
+Reading the serial needs `READ_PHONE_STATE`; grant it under **Settings → Device**,
+which also shows the token. Ungranted, the parameter is omitted and the server
+sees an unknown device.
+
 ## Device notes: Portal (2nd generation)
 
 Portal firmware ships a system app verifier (`com.facebook.appverifier`) that
