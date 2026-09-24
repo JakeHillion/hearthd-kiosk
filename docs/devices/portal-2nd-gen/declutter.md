@@ -1,25 +1,35 @@
 # Portal (2nd generation) declutter
 
 Device-specific notes for stripping a Meta Portal (2nd gen) down to a hearthd
-kiosk over ADB. This is a record of what was actually done on one unit, not a
-polished supported procedure. Read the warnings before repeating it.
+kiosk over ADB. Every Meta package on the device is in one of three states:
 
-## ADB is session-only — keep Meta's settings app
+- **[Safe to remove](#safe-to-remove)**: removed together and confirmed to
+  survive a reboot with ADB re-enable still working.
+- **[Known to break ADB](#known-to-break-adb--keep)**: removing it loses the
+  only route back to a shell after a reboot. Keep.
+- **[Unknown](#unknown--keep-testing-risks-a-factory-reset)**: untested. The
+  only test is to remove it and reboot, and if it's load-bearing that reboot
+  forces a factory reset. Keep.
+
+This is not a polished supported procedure. Read the warnings before
+repeating it.
+
+## ADB is session-only
 
 Portal disables ADB on every boot, and it can't be made persistent. Setting
 `persist.sys.usb.config=adb`, `adb_enabled=1` and `development_settings_enabled=1`
 before a reboot does **not** hold — the device comes back up in USB-accessory
 mode with no ADB interface. Something in the retained Aloha framework re-applies
-the USB config at boot (confirmed by reboot test on this unit).
+the USB config at boot.
 
 The only on-device way to turn ADB back on is **Settings → Debug → ADB Enabled**
-in Meta's settings app. So **do not remove `com.facebook.alohaapps.settings`** —
-it is kept on purpose. After any reboot, re-enable ADB there and re-accept the
+in Meta's settings app. After any reboot, re-enable ADB there and re-accept the
 "Allow USB debugging?" prompt over USB-C.
 
-Removing the settings app would swap Meta's cut-down Settings for the full AOSP
-one, but it also removes the only ADB re-enable path: a later reboot then strands
-the device with no shell and forces a factory reset. Not worth it — keep it.
+That makes every removal a question of whether the Debug entry still exists
+after a boot. A removal that loses it strands the device with no shell, and the
+only way back is a factory reset. It doesn't show until the reboot: before
+then the device looks fine, and `cmd package install-existing` still works.
 
 The hardware factory reset is unaffected by any of this — see the end.
 
@@ -33,29 +43,39 @@ The hardware factory reset is unaffected by any of this — see the end.
 - **ADB enabled and authorised**: Settings → Debug → ADB Enabled, then accept the
   "Allow USB debugging?" prompt for this computer over USB-C.
 
-### Version this was done on
+### Firmware this applies to
+
+Verified on the Portal (`ro.product.model=Portal`) and Portal Mini
+(`PortalMini`), both `ro.product.device=omni`, which share the firmware below
+and the same set of 51 `com.facebook.*` packages. On other firmware, compare
+the package list before relying on this.
 
 | Field | Value |
 | --- | --- |
-| Model | Portal (`ro.product.model=Portal`, `ro.product.device=omni`) |
 | Android | 10 (API 29) |
 | Build | `QKQ1.210213.001.3051355900018050` |
 | Build date | 2025-10-14 |
 | Security patch | 2020-08-05 |
-| hearthd-kiosk installed | `0.1.0+b4a4be5` (signed `main` from assets.hearthd.dev) |
 
 ### Host notes
 
 - All removals use `pm uninstall --user 0 <pkg>`. This removes the package for
   user 0 but keeps the system APK, so **a factory reset restores everything**.
-  To undo a single one before a reset: `adb shell cmd package install-existing <pkg>`.
+  To undo a single one before a reboot: `adb shell cmd package install-existing <pkg>`.
 - On Linux the Portal shows up as `2ec6:1903` with an "ADB Interface" once ADB is
   on. If `adb devices` shows `no permissions`, the raw USB node is root-owned;
   `chmod a+rw /dev/bus/usb/<bus>/<dev>` (path from the device's `busnum`/`devnum`)
   fixes it without needing a udev rule.
+- On macOS, a newly connected Portal waits behind the "Allow accessory to
+  connect?" system prompt and doesn't enumerate at all until it's accepted — it
+  is absent from `ioreg -p IOUSB`, not merely unauthorised in `adb devices`.
+- If it enumerates but exposes only an "Android Accessory Interface" (class
+  `ff/ff/00`) and `adb devices` is empty, ADB Enabled hasn't taken effect for
+  this boot: toggle it off and on again in Settings → Debug.
 - After each batch below, sanity-check the device stayed alive:
-  `adb get-state`, `adb shell pidof com.android.systemui`, and that a HOME
-  activity still resolves.
+  `adb get-state`, `adb shell pidof com.android.systemui`, that a HOME
+  activity still resolves, and that the install-source appop (below) still
+  reads `allow`.
 
 ## Install hearthd-kiosk and make it the launcher
 
@@ -69,9 +89,37 @@ adb install -r hearthd-kiosk.apk
 adb shell cmd package set-home-activity dev.hearthd.android.kiosk/.MainActivity
 ```
 
-## What was removed
+### Allow it to install its own updates
 
-Everything in this section was removed with:
+In-app updates need two things on this device. Do both straight after
+installing, before removing anything:
+
+```
+adb shell appops set dev.hearthd.android.kiosk REQUEST_INSTALL_PACKAGES allow
+adb shell settings put global package_verifier_enable 0
+```
+
+The appop approves hearthd-kiosk as an install source — the per-app "Install
+unknown apps" permission. Without it, the first update raises a prompt that
+sends you to AOSP Settings (`com.android.settings`,
+`Settings$ManageAppExternalSourcesActivity`) to approve the app, and that route
+can't be relied on once the packages below are gone (`rro.niu.settings`, for
+one, themes that screen). Set over ADB up front, the approval needs no screen
+at all, and it persists across reboots. Check it with
+`adb shell appops get dev.hearthd.android.kiosk REQUEST_INSTALL_PACKAGES`.
+
+The verifier setting is the README's fix for Meta's verifier vetoing
+non-Meta-signed installs; `com.facebook.appverifier` is also removed below.
+
+On API 29 each update still raises the system "confirm install" prompt, which
+someone has to accept on the device.
+
+## Safe to remove
+
+All 38 packages in this section, removed together, survive a reboot: ADB
+Enabled is still offered in Settings → Debug and works, hearthd-kiosk comes up
+as home, and the install-source appop and verifier setting hold. Remove each
+with:
 
 ```
 adb shell pm uninstall --user 0 <package>
@@ -132,19 +180,19 @@ degrades Meta's launcher, which is fine because it gets removed below.
 - `com.facebook.alohaapps.superframe`
 - `com.facebook.alohaapps.controlcenter`
 
-### SDK service wrappers and resource overlays
+### SDK service wrappers and the Settings overlay
 
-Meta wrappers around Bluetooth/location/etc. and two runtime resource overlays.
-(System Bluetooth/location remain — these are the Aloha shims, not the AOSP
-services.)
+Meta wrappers around Bluetooth/location/etc. (System Bluetooth/location
+remain — these are the Aloha shims, not the AOSP services.) `alohasdk.settings`
+and `rro.niu.settings` sit close to the settings plumbing, but removing them
+does not lose the Debug entry.
 
 - `com.facebook.alohasdk.bluetooth`
 - `com.facebook.alohasdk.location`
 - `com.facebook.alohasdk.pushnotification`
-- `com.facebook.alohasdk.settings`
+- `com.facebook.alohasdk.settings` (`PlatformSettingsService`, a priv-app)
 - `com.facebook.alohasdk.virtualcameramanager`
-- `com.facebook.aloha.rro.niu.android`
-- `com.facebook.aloha.rro.niu.settings`
+- `com.facebook.aloha.rro.niu.settings` (overlay targeting `com.android.settings`)
 
 ### Placeholder packages
 
@@ -156,26 +204,48 @@ Empty "dummy" system packages.
 ### Package verifier
 
 Meta's install verifier that rejects non-Meta-signed installs. Removing the
-package achieves the same end as the README's
-`settings put global package_verifier_enable 0` (which you can also set).
-ADB sideloads are exempt from it regardless.
+package achieves the same end as `settings put global package_verifier_enable 0`
+(set above). ADB sideloads are exempt from it regardless.
 
 - `com.facebook.appverifier`
 
 ### Launcher, setup and personalisation
 
-Remove these **only after** hearthd-kiosk is installed and set as home. Do **not**
-remove `com.facebook.alohaapps.settings` — it's the ADB re-enable path (see the
-top); it stays.
+Remove these **only after** hearthd-kiosk is installed and set as home, or the
+device is left with no home screen.
 
 - `com.facebook.alohaapps.launcher` (Meta home screen)
 - `com.facebook.alohaapps.devicesetup` (out-of-box setup; already spent)
 - `com.facebook.alohaapps.personaluser`
 
-### Login / account / device-policy stack — removes the Facebook login
+### WebView provider
 
-The device-admin app, the device-policy controller (no active admin was
-enrolled, so this was safe), the account services and secure-state shim.
+`com.facebook.portal.webview` is the device's only WebView provider (fallback
+disabled). hearthd-kiosk does not use WebView: the app source has zero
+`android.webkit` references, and the only refs in the APK are dead code paths
+inside bundled libraries. After removal the current WebView package is `null`,
+and the kiosk is unaffected. **If you run any other app that uses WebView, keep
+this.**
+
+- `com.facebook.portal.webview`
+
+## Known to break ADB — keep
+
+### Meta's settings app
+
+`com.facebook.alohaapps.settings` holds Settings → Debug → ADB Enabled, the only
+ADB re-enable path. Removing it swaps Meta's cut-down Settings for the full AOSP
+one, but a later reboot then strands the device with no shell.
+
+- `com.facebook.alohaapps.settings`
+
+### Login / account / device-policy stack
+
+The device-admin app, the device-policy controller, the account services and
+the secure-state shim. With the safe set above removed, removing these five as
+well loses the Debug entry after a reboot. Which of the five carries it is not
+known; they have only been removed as a batch, so treat all five as
+load-bearing.
 
 - `com.facebook.alohaservices.deviceadmin`
 - `com.facebook.aloha.dpc`
@@ -183,37 +253,24 @@ enrolled, so this was safe), the account services and secure-state shim.
 - `com.facebook.aloha.deviceidentity`
 - `com.facebook.alohasdk.platformsecurestate`
 
-> This clears the Facebook login. The four Meta accounts
-> (`aloha.hw` / `aloha.pl` / `aloha.sso` / `aloha.privowner`) drop away once
-> AccountManager reconciles the removal — give it a moment, don't check
-> instantly. Verify with `adb shell dumpsys account | grep -c 'Account {'`
-> (expect `0`). No reboot is needed for this.
+Keeping them keeps the Facebook login and the four Meta accounts
+(`aloha.hw` / `aloha.pl` / `aloha.sso` / `aloha.privowner`). That rules out
+making hearthd-kiosk device owner (silent installs, stronger lockdown):
+`dpm set-device-owner` refuses a device with accounts.
 
-### WebView provider
+## Unknown — keep, testing risks a factory reset
 
-`com.facebook.portal.webview` was the device's only WebView provider (fallback
-disabled). It was removed after confirming hearthd-kiosk does not use WebView:
-the app source has zero `android.webkit` references, and the only refs in the
-APK are dead code paths inside bundled libraries. After removal the current
-WebView package is `null`, and the kiosk was unaffected. **If you run any other
-app that uses WebView, keep this.**
+Untested. Each could only be tested by removing it and rebooting, and if it
+turns out to be load-bearing, that reboot forces a factory reset.
 
-- `com.facebook.portal.webview`
+### Framework overlay
 
-## Left installed (kept on purpose)
+- `com.facebook.aloha.rro.niu.android` (theme overlay targeting `android`)
 
-### Meta's settings app — the ADB re-enable path
+### Deep Aloha OS substrate
 
-`com.facebook.alohaapps.settings` is kept so ADB can be turned back on after a
-reboot (Settings → Debug → ADB Enabled). See the top of this doc.
-
-### Deep Aloha OS substrate — not safely removable
-
-The core Aloha framework packages. Not removed: they are the OS substrate
-(hardware integration, core services, native libs), so removal risks a boot loop,
-and the only way to validate removal is a reboot. A bad reboot forces a factory
-reset — the one outcome this procedure is built to avoid — so these are left in
-place rather than probed.
+The core Aloha framework packages: hardware integration, core services, native
+libs. Beyond the ADB risk, removing these risks a boot loop.
 
 - `com.facebook.aloha.system.device`
 - `com.facebook.aloha.system.services`
@@ -222,14 +279,7 @@ place rather than probed.
 - `com.facebook.aloha.platformmobileconfig`
 - `com.facebook.portal.sdk`
 
-No AOSP or Qualcomm system packages were touched — those are the OS, not bloat.
-
-### Optional next step: device owner
-
-With the accounts gone, `dpm set-device-owner` is no longer blocked by the
-"device has accounts" check, so hearthd-kiosk could be made device owner (silent
-installs, stronger lockdown). Not done here: device owner can only be removed by
-a factory reset, so it's a deliberate one-way choice, left to the operator.
+No AOSP or Qualcomm system packages are touched — those are the OS, not bloat.
 
 ## Factory reset is intact
 
@@ -242,4 +292,4 @@ restriction, and isn't reliable):
   countdown. Keep USB unplugged until it's booted — a USB-attached boot during
   the reset can drop the device into Qualcomm EDL (`05c6:9008`) instead.
 
-A reset restores every package removed above and brings back the Facebook login.
+A reset restores every package removed above.
