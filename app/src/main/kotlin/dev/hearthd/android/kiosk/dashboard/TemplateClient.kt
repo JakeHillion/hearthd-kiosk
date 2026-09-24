@@ -13,11 +13,17 @@ import java.security.MessageDigest
  * dashboard and template-control paths. Content addressing gives integrity for
  * free: [fetchTemplateJson] verifies the body against the requested sha256 before
  * returning it, so callers parse only verified bytes.
+ *
+ * Only `/state` identifies the device (see [DeviceToken]) — that request is where
+ * the server decides which view this device gets. The template is addressed by the
+ * hash that decision produced, so it needs no identity of its own and stays a
+ * shared, cacheable object.
  */
 class TemplateClient(private val client: OkHttpClient = OkHttpClient()) {
 
-    suspend fun fetchState(stateUrl: String): StateResponse = withContext(Dispatchers.IO) {
-        val request = Request.Builder().url(stateUrl).build()
+    /** Fetch `/state`, identifying this device to the server when [deviceToken] is set. */
+    suspend fun fetchState(stateUrl: String, deviceToken: String?): StateResponse = withContext(Dispatchers.IO) {
+        val request = Request.Builder().url(identified(stateUrl, deviceToken)).build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw IOException("state fetch failed: HTTP ${response.code}")
             val body = response.body?.string() ?: throw IOException("state fetch: empty body")
@@ -43,6 +49,19 @@ class TemplateClient(private val client: OkHttpClient = OkHttpClient()) {
         }
 
     companion object {
+        /**
+         * Tag [url] with the device's token. Set rather than added, so a state URL
+         * that already carries a `device` param doesn't end up with two — the
+         * device's own identity is the one that should reach the server.
+         */
+        internal fun identified(url: String, deviceToken: String?): String {
+            if (deviceToken.isNullOrBlank()) return url
+            return url.toHttpUrl().newBuilder()
+                .setQueryParameter(DeviceToken.QUERY_PARAM, deviceToken)
+                .build()
+                .toString()
+        }
+
         /** Derive `…/template/<hash>` as a sibling of the configured `…/state`. */
         internal fun templateUrl(stateUrl: String, hash: String): String {
             val base = stateUrl.toHttpUrl()

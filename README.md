@@ -65,6 +65,55 @@ device.
 
 Some devices need extra setup before this works at all — see below.
 
+## Device identity
+
+The dashboard's `/state` request identifies the device, so one server can serve a
+different kiosk view to each display it feeds. The device sends a short token as a
+query parameter:
+
+    GET /state?device=a1b2c3d4e5f60718
+
+Only `/state` carries it. `/template/<sha256>` is content-addressed — the state
+response already named the template the server picked for this device — so the
+template fetch stays anonymous and cacheable.
+
+An unidentified device omits the parameter entirely rather than sending an empty
+one, so a server can treat "no `device`" as the default view and needs no special
+case for a device that hasn't been set up.
+
+### Where the token comes from
+
+It's a truncated, namespaced hash of the hardware serial:
+
+    token = sha256("hearthd-kiosk/device/" + serial)[:16]   # hex, 64 bits
+
+Derived rather than generated because the serial is the only per-device value that
+outlives a factory reset: everything the app persists lives in `/data`, which a
+reset wipes, and `ANDROID_ID` is regenerated. A generated token would mean
+re-pairing the device with the server after every reset; a derived one comes back
+on its own, and survives a reinstall too.
+
+### Enabling it
+
+Reading the serial needs `READ_PHONE_STATE`, which is runtime-granted. Nothing
+prompts for it on its own — a kiosk shouldn't throw a system dialog at whoever
+walks past — so grant it from **Settings → Device**, which also shows the
+resulting token for you to key the server off. Granted there, it takes effect
+immediately — the next `/state` poll carries it.
+
+It can also be granted over ADB, but `pm grant` doesn't wake the app, and on a
+kiosk the activity never resumes on its own, so restart it afterwards:
+
+    adb shell pm grant dev.hearthd.android.kiosk android.permission.READ_PHONE_STATE
+    adb shell am force-stop dev.hearthd.android.kiosk
+    adb shell am start -n dev.hearthd.android.kiosk/.MainActivity
+
+> [!NOTE]
+> Android 10 closed `Build.getSerial()` to anything without a privileged
+> permission. The supported hardware (Portal, API 28) predates that, but on an
+> API 29+ device no token can be derived and `/state` goes out unidentified —
+> **Settings → Device** says so rather than showing an empty value.
+
 ## Device notes: Portal (2nd generation)
 
 Portal firmware ships a system app verifier (`com.facebook.appverifier`) that

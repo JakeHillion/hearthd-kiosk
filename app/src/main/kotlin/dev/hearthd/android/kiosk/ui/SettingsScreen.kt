@@ -97,7 +97,10 @@ fun SettingsScreen(
     volumeSync: SnapcastVolumeSync,
     nowPlaying: SnapcastNowPlaying,
     managed: ManagedSettingsController,
+    deviceToken: String?,
+    deviceTokenGranted: Boolean,
     onRequestMicPermission: () -> Unit,
+    onRequestDeviceToken: () -> Unit,
     onTestVoice: suspend (VoiceSettings) -> String,
     onClose: () -> Unit,
 ) {
@@ -196,7 +199,7 @@ fun SettingsScreen(
                 locked = locked,
                 onEnabledChange = { scope.launch { settingsRepo.setDashboardEnabled(it) } },
                 onStateUrlChange = { scope.launch { settingsRepo.setDashboardStateUrl(it) } },
-                onRefreshNow = { url -> scope.launch { dashboard.poll(url) } },
+                onRefreshNow = { url -> scope.launch { dashboard.poll(url, deviceToken) } },
                 onHearthdEnabledChange = { scope.launch { settingsRepo.setHearthdEnabled(it) } },
                 onHearthdBaseUrlChange = { scope.launch { settingsRepo.setHearthdBaseUrl(it) } },
             )
@@ -234,7 +237,11 @@ fun SettingsScreen(
                 onPipelineChange = { scope.launch { settingsRepo.setVoicePipeline(it) } },
                 onTest = onTestVoice,
             )
-            SettingsSection.DEVICE_INFO -> DeviceInfoPane()
+            SettingsSection.DEVICE_INFO -> DeviceInfoPane(
+                deviceToken = deviceToken,
+                deviceTokenGranted = deviceTokenGranted,
+                onRequestDeviceToken = onRequestDeviceToken,
+            )
             SettingsSection.SENSORS -> SensorsPane()
         }
     }
@@ -835,7 +842,11 @@ private fun SectionHeading(text: String) {
 }
 
 @Composable
-private fun DeviceInfoPane() {
+private fun DeviceInfoPane(
+    deviceToken: String?,
+    deviceTokenGranted: Boolean,
+    onRequestDeviceToken: () -> Unit,
+) {
     // The licenses page lives under Device (the "About" section), the way most
     // apps nest their open-source notices. A local flag swaps it in and back.
     var showLicenses by rememberSaveable { mutableStateOf(false) }
@@ -873,6 +884,36 @@ private fun DeviceInfoPane() {
             stringResource(R.string.device_app_version),
             stringResource(R.string.version_label, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE),
         )
+        InfoRow(
+            stringResource(R.string.device_token),
+            deviceToken ?: stringResource(R.string.device_token_none),
+        )
+        Spacer(Modifier.height(8.dp))
+
+        // How the server tells this device apart. Read it off here and key the
+        // per-device view off it; see DeviceToken for why it's derived from the
+        // serial rather than generated.
+        Text(
+            stringResource(R.string.device_token_summary),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        if (deviceToken == null) {
+            Spacer(Modifier.height(8.dp))
+            // Nothing prompts for this permission on its own — a kiosk shouldn't
+            // throw a system dialog at whoever walks past — so the grant lives
+            // here, next to the empty value that explains why it's needed.
+            if (deviceTokenGranted) {
+                Text(
+                    stringResource(R.string.device_token_unavailable),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            } else {
+                OutlinedButton(onClick = onRequestDeviceToken) {
+                    Text(stringResource(R.string.device_token_grant))
+                }
+            }
+        }
         Spacer(Modifier.height(24.dp))
 
         // Open-source notices.

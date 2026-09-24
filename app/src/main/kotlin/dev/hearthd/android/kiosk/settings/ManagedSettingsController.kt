@@ -41,16 +41,18 @@ class ManagedSettingsController(
     private var backoffSeconds = MIN_BACKOFF_SECONDS
 
     /**
-     * Run one poll against [stateUrl]. Returns seconds to wait before the next
-     * call: the server's clamped `refresh_interval` on success, else a growing
-     * backoff.
+     * Run one poll against [stateUrl], identifying this device to the server with
+     * [deviceToken] when we have one — so a template can carry per-device settings
+     * the same way the dashboard carries a per-device view. Returns seconds to wait
+     * before the next call: the server's clamped `refresh_interval` on success,
+     * else a growing backoff.
      */
-    suspend fun poll(stateUrl: String): Int = runLock.withLock {
+    suspend fun poll(stateUrl: String, deviceToken: String?): Int = runLock.withLock {
         if (_state.value.status == ManagedStatus.IDLE) {
             _state.update { it.copy(status = ManagedStatus.LOADING) }
         }
         try {
-            val response = templates.fetchState(stateUrl)
+            val response = templates.fetchState(stateUrl, deviceToken)
             val templateJson = templates.fetchTemplateJson(stateUrl, response.templateHash)
             val settings = JSONObject(templateJson).optJSONObject("settings") ?: JSONObject()
             saveConfig(settings.toString())
