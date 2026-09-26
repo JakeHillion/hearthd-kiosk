@@ -15,6 +15,7 @@ import androidx.core.content.ContextCompat
 import dev.hearthd.android.kiosk.KioskApp
 import dev.hearthd.android.kiosk.MainActivity
 import dev.hearthd.android.kiosk.R
+import dev.hearthd.android.kiosk.screen.ScreenWaker
 import dev.hearthd.android.kiosk.voice.HomeAssistantAssist
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +54,8 @@ class KioskService : Service() {
 
     private val app: KioskApp get() = application as KioskApp
 
+    private val screenWaker by lazy { ScreenWaker(this) }
+
     override fun onCreate() {
         super.onCreate()
         runStatePoll()
@@ -60,6 +63,7 @@ class KioskService : Service() {
         runVolumeSync()
         runWakeWord()
         runVoice()
+        runWakeScreen()
     }
 
     // Restarted by the system if the process is reclaimed; redelivery isn't
@@ -183,6 +187,16 @@ class KioskService : Service() {
                     app.voice.startTurn(scope, assistant, app.wakeWord.audioFrames)
                 }
             }
+        }
+    }
+
+    /**
+     * Light the panel on every detection, whether or not voice is on, so a
+     * person who speaks to a dark panel sees it answer.
+     */
+    private fun runWakeScreen() {
+        scope.launch {
+            app.wakeWord.events.collect { screenWaker.wake() }
         }
     }
 
