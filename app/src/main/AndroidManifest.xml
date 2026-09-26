@@ -15,7 +15,8 @@
          either way. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Lighting the panel again when the wake word is heard. -->
+    <!-- Lighting the panel again when the wake word is heard, and keeping the
+         CPU running while it is dark. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- Only used once the user opts in to wake-word detection. The mic is not

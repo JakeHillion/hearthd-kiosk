@@ -1,5 +1,6 @@
 package dev.hearthd.android.kiosk.service
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -9,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -56,8 +58,11 @@ class KioskService : Service() {
 
     private val screenWaker by lazy { ScreenWaker(this) }
 
+    private var cpuLock: PowerManager.WakeLock? = null
+
     override fun onCreate() {
         super.onCreate()
+        holdCpu()
         runStatePoll()
         runSnapcast()
         runVolumeSync()
@@ -79,7 +84,24 @@ class KioskService : Service() {
 
     override fun onDestroy() {
         scope.cancel()
+        cpuLock?.release()
         super.onDestroy()
+    }
+
+    /**
+     * Keep the CPU running with the screen off. Being a foreground service
+     * keeps the process alive but not scheduled: once the display sleeps the
+     * device may suspend, stalling the poll's timers and the Snapcast sockets
+     * until something wakes it. No timeout, because the service is meant to run
+     * for as long as the device is on.
+     */
+    @SuppressLint("WakelockTimeout")
+    private fun holdCpu() {
+        val power = getSystemService(Context.POWER_SERVICE) as PowerManager
+        cpuLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, CPU_LOCK_TAG).apply {
+            setReferenceCounted(false)
+            acquire()
+        }
     }
 
     /**
@@ -255,6 +277,7 @@ class KioskService : Service() {
     companion object {
         private const val CHANNEL_ID = "kiosk_service"
         private const val NOTIFICATION_ID = 1
+        private const val CPU_LOCK_TAG = "hearthd:service"
 
         /** Start the service if it isn't already running; safe to call repeatedly. */
         fun start(context: Context) {
