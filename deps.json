@@ -1497,9 +1497,9 @@
    "jar": "sha256-xI20+M0b/Wf3LVklUGX7Qb/aQ8opQtrE2d64l6oSa6Q=",
    "pom": "sha256-rkZhSQZBRATO/EGkZ0NSBdbe5nojkFmDKKY5rSusvRE="
   },
-  "org/jetbrains/kotlin#kotlin-reflect/2.3.20": {
-   "jar": "sha256-40b6PD/0RR9fcHoxKIf9TIVV2kjMFfqdsrqTwz+J+BM=",
-   "pom": "sha256-iwC9L+srtVON85aVQXTZ3cDsVA00ElhjA1ObHpZVwzM="
+  "org/jetbrains/kotlin#kotlin-reflect/2.4.0": {
+   "jar": "sha256-8NjokIYk60R4uxMen4hzZmgNLiOXQRleVI+lyQaWO5A=",
+   "pom": "sha256-nhge5PIdScXIVQw8/KcZnBdZCo3z0eopPjlnmOTxCEI="
   },
   "org/jetbrains/kotlin#kotlin-script-runtime/2.4.10": {
    "jar": "sha256-9KWzDC/fvjhrCXEBt5idvuo3Q8BjlhNmZHhOCOFcaJk=",
@@ -1518,10 +1518,10 @@
    "module": "sha256-23jfCCg1kctnyLnSeWEJ61K2CI1N/hArVF8gEYJJcT8=",
    "pom": "sha256-RUulB6PTa0rCU99t+W+HOb0m6hnfPzMrELE/LFcV94c="
   },
-  "org/jetbrains/kotlin#kotlin-stdlib/2.3.20": {
-   "jar": "sha256-CuElBKUEDrrzdwOQhINCDRpWJN0dk/NXZl+Md8hIoB4=",
-   "module": "sha256-9Os0T8TR46KK4WwIbsPkL1I3O0ZtQwgYL7OG45LA76M=",
-   "pom": "sha256-yDwC2afi6VRzBJHDPC8dwDwnZi4ntWbsK0TS0Bhjm5g="
+  "org/jetbrains/kotlin#kotlin-stdlib/2.4.0": {
+   "jar": "sha256-zLFP+D+ryxFFi3mNvJgkdIzN/+7HnJq6eJ5u0c2oaxw=",
+   "module": "sha256-wkpH3L2Sldd29EO+Qdd6wkUwlgHtBTcR3uKwJUvgLbY=",
+   "pom": "sha256-gZT/eanuJKf6P3SmsXnAShhZ3ouYek8JgwVuWUUXId4="
   },
   "org/jetbrains/kotlin#kotlin-stdlib/2.4.10": {
    "jar": "sha256-TsApO8N1FCOyA/HYSTJRxXxC5z62N3prhWDQl0/wpt8=",
@@ -1671,29 +1671,29 @@
   "com/microsoft/onnxruntime/onnxruntime-android/maven-metadata": {
    "xml": {
     "groupId": "com.microsoft.onnxruntime",
-    "lastUpdated": "20260812072317",
-    "release": "1.29.0"
+    "lastUpdated": "20260914203258",
+    "release": "1.30.0"
    }
   },
   "com/squareup/okhttp3/okhttp/maven-metadata": {
    "xml": {
     "groupId": "com.squareup.okhttp3",
-    "lastUpdated": "20260608203235",
-    "release": "5.4.0"
+    "lastUpdated": "20260816161727",
+    "release": "5.5.0"
    }
   },
   "io/coil-kt/coil3/coil-compose/maven-metadata": {
    "xml": {
     "groupId": "io.coil-kt.coil3",
-    "lastUpdated": "20260610143130",
-    "release": "3.5.0"
+    "lastUpdated": "20260918073823",
+    "release": "3.6.3"
    }
   },
   "io/coil-kt/coil3/coil-network-okhttp/maven-metadata": {
    "xml": {
     "groupId": "io.coil-kt.coil3",
-    "lastUpdated": "20260610143341",
-    "release": "3.5.0"
+    "lastUpdated": "20260918073824",
+    "release": "3.6.3"
    }
   }
  }

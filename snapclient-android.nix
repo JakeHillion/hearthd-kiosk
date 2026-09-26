@@ -67,13 +67,7 @@ let
       "-DBUILD_EXAMPLES=OFF"
     ];
   });
-  tremorS = cross.tremor.overrideAttrs (o: {
-    # Android lacks the BYTE_ORDER macros in this include context, so misc.h
-    # takes both endian branches and defines `union magic` twice; and lld rejects
-    # the version script naming symbols tremor doesn't build. Force LE + tolerate.
-    NIX_CFLAGS_COMPILE = toString (o.NIX_CFLAGS_COMPILE or "")
-      + " -DBYTE_ORDER=1234 -DLITTLE_ENDIAN=1234 -DBIG_ENDIAN=4321";
-    NIX_CFLAGS_LINK = toString (o.NIX_CFLAGS_LINK or "") + " -Wl,--undefined-version";
+  vorbisS = cross.libvorbis.overrideAttrs (o: {
     configureFlags = (o.configureFlags or []) ++ [ "--disable-shared" "--enable-static" ];
   });
 
@@ -107,7 +101,7 @@ let
 
   # ---- CMake shim configs ----------------------------------------------------
   # snapcast's Android branch does CONFIG-mode find_package for lowercase package
-  # names (oboe, flac, ogg, opus, soxr, tremor, boost) that only exist in
+  # names (oboe, flac, ogg, opus, soxr, vorbis, boost) that only exist in
   # snapdroid's prebuilt-dependency environment. Synthesise them, each exporting
   # the name::name imported target the CMakeLists links against.
   shims = pkgs.runCommand "snapclient-cmake-shims" { } ''
@@ -127,7 +121,7 @@ let
     imp opus   opus::opus     "${opusS.out}/lib/libopus.a"          "${opusS.dev}/include;${opusS.dev}/include/opus"
     imp soxr   soxr::soxr     "${soxrS.out}/lib/libsoxr.a"          "${soxrS.dev}/include"
     imp oboe   oboe::oboe     "${oboe}/lib/liboboe.a"               "${oboe}/include"
-    imp tremor tremor::tremor "${tremorS.out}/lib/libvorbisidec.a"  "${tremorS.dev}/include"
+    imp vorbis vorbis::vorbis "${vorbisS.out}/lib/libvorbis.a"      "${vorbisS.dev}/include"
 
     # boost is header-only for snapcast (asio); native headers are arch-agnostic.
     mkdir -p "$out/lib/cmake/boost"
@@ -144,6 +138,17 @@ pkgs.stdenv.mkDerivation {
   version = pkgs.snapcast.version;
   src = pkgs.snapcast.src; # rides the nixpkgs pin -> auto-updates
 
+  # snapcast's Android branch hardwires Tremor, which nixpkgs doesn't package.
+  # The ogg decoder builds equally against libvorbis (HAS_VORBIS), so point the
+  # Android branch at that.
+  postPatch = ''
+    substituteInPlace CMakeLists.txt \
+      --replace-fail "find_package(tremor REQUIRED CONFIG)" "find_package(vorbis REQUIRED CONFIG)" \
+      --replace-fail "add_compile_definitions(HAS_TREMOR)" "add_compile_definitions(HAS_VORBIS)"
+    substituteInPlace client/CMakeLists.txt \
+      --replace-fail "tremor::tremor" "vorbis::vorbis"
+  '';
+
   nativeBuildInputs = [ pkgs.cmake pkgs.ninja pkgs.pkg-config ];
   dontUseCmakeConfigure = true;
 
@@ -154,7 +159,7 @@ pkgs.stdenv.mkDerivation {
       -DBUILD_STATIC_LIBS=ON -DBUILD_SHARED_LIBS=OFF \
       -DBUILD_WITH_SSL=OFF -DBUILD_WITH_AVAHI=OFF -DBUILD_WITH_EXPAT=OFF \
       -DBUILD_WITH_FLAC=ON -DBUILD_WITH_OPUS=ON \
-      -DBUILD_WITH_VORBIS=ON -DBUILD_WITH_TREMOR=ON \
+      -DBUILD_WITH_VORBIS=ON \
       -DCMAKE_PREFIX_PATH="${shims}" \
       -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH
     cmake --build build -j $NIX_BUILD_CORES
