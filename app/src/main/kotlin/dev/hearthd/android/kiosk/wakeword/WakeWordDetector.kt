@@ -39,9 +39,9 @@ data class WakeWordDetection(
 /**
  * Owns the microphone and the inference pipeline. Mirrors UpdateController: it
  * holds the UI state and does nothing — never touching the mic — until [run] is
- * called. [run] listens until its coroutine is cancelled (a settings change or
- * the app leaving the foreground), so the caller gates it behind the opt-in and
- * the runtime permission.
+ * called. [run] listens until its coroutine is cancelled (a settings or
+ * permission change), so the caller gates it behind the opt-in and the runtime
+ * permission.
  */
 class WakeWordDetector(private val appContext: Context) {
 
@@ -90,7 +90,7 @@ class WakeWordDetector(private val appContext: Context) {
         }
     }
 
-    @SuppressLint("MissingPermission") // Caller gates on the runtime grant; see MainActivity.
+    @SuppressLint("MissingPermission") // Caller gates on the runtime grant; see KioskService.
     private suspend fun listen(
         pipeline: OnnxWakeWordPipeline,
         model: WakeWordModel,

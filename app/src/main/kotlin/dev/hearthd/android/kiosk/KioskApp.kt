@@ -1,11 +1,18 @@
 package dev.hearthd.android.kiosk
 
+import android.Manifest
 import android.app.Application
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import dev.hearthd.android.kiosk.dashboard.DashboardController
 import dev.hearthd.android.kiosk.settings.ManagedSettingsController
 import dev.hearthd.android.kiosk.settings.SettingsRepository
 import dev.hearthd.android.kiosk.snapcast.SnapcastController
 import dev.hearthd.android.kiosk.snapcast.SnapcastVolumeSync
+import dev.hearthd.android.kiosk.voice.VoiceController
+import dev.hearthd.android.kiosk.wakeword.WakeWordDetector
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 
 /**
@@ -57,4 +64,26 @@ class KioskApp : Application() {
      * client running, and because it is its own opt-in.
      */
     val volumeSync: SnapcastVolumeSync by lazy { SnapcastVolumeSync(this) }
+
+    /** The microphone and wake-word model, and the frames voice turns stream. */
+    val wakeWord: WakeWordDetector by lazy { WakeWordDetector(this) }
+
+    /** The Home Assistant turn a detection starts, and the popup that shows it. */
+    val voice: VoiceController by lazy { VoiceController() }
+
+    private val _micPermission by lazy { MutableStateFlow(hasMicPermission()) }
+
+    /**
+     * Whether RECORD_AUDIO is granted. Only an activity can ask for it, so the
+     * activity calls [refreshMicPermission] whenever it may have changed.
+     */
+    val micPermission: StateFlow<Boolean> get() = _micPermission
+
+    fun refreshMicPermission() {
+        _micPermission.value = hasMicPermission()
+    }
+
+    fun hasMicPermission(): Boolean =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
 }
