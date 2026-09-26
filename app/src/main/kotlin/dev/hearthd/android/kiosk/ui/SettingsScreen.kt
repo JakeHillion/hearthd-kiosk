@@ -1194,7 +1194,7 @@ private val THIRD_PARTY_LICENSES = listOf(
         license = "BSD-3-Clause · Apache-2.0 · LGPL-2.1-or-later · BSL-1.0",
         notice = "The snapclient binary statically links several open-source " +
             "libraries:\n\n" +
-            "• FLAC, libogg, Opus, and the Tremor Vorbis decoder — BSD-3-Clause " +
+            "• FLAC, libogg, libvorbis, and Opus — BSD-3-Clause " +
             "(© the Xiph.Org Foundation)\n" +
             "• oboe — Apache License 2.0 (© Google LLC)\n" +
             "• libsoxr (SoX Resampler) — LGPL-2.1-or-later\n" +
