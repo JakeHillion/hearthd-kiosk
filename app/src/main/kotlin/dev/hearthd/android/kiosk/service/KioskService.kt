@@ -15,6 +15,7 @@ import androidx.core.content.ContextCompat
 import dev.hearthd.android.kiosk.KioskApp
 import dev.hearthd.android.kiosk.MainActivity
 import dev.hearthd.android.kiosk.R
+import dev.hearthd.android.kiosk.voice.HomeAssistantAssist
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -54,15 +55,21 @@ class KioskService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        startForeground()
         runStatePoll()
         runSnapcast()
         runVolumeSync()
+        runWakeWord()
+        runVoice()
     }
 
     // Restarted by the system if the process is reclaimed; redelivery isn't
     // wanted, since the loops rebuild their own state from settings on start.
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    // Each start re-promotes the service, since that is where the microphone
+    // type is added once the permission has been granted.
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startForeground()
+        return START_STICKY
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -143,6 +150,43 @@ class KioskService : Service() {
     }
 
     /**
+     * The wake-word detector, which owns the microphone, so that it keeps
+     * listening while the panel is dark.
+     *
+     * collectLatest cancels the listening session (releasing the mic) the
+     * instant settings or the permission change.
+     */
+    private fun runWakeWord() {
+        scope.launch {
+            combine(app.settings.wakeWord, app.micPermission) { s, granted -> s to granted }
+                .collectLatest { (s, granted) ->
+                    when {
+                        !s.enabled -> app.wakeWord.markDisabled()
+                        !granted -> app.wakeWord.markNoPermission()
+                        else -> app.wakeWord.run(s.model, s.threshold)
+                    }
+                }
+        }
+    }
+
+    /**
+     * Voice (Alpha): when enabled and configured, a wake-word detection starts a
+     * Home Assistant turn, streaming the mic frames the detector publishes.
+     * collectLatest rebuilds the assistant when the HA settings change.
+     */
+    private fun runVoice() {
+        scope.launch {
+            app.settings.voice.collectLatest { v ->
+                if (!v.enabled || !v.configured) return@collectLatest
+                val assistant = HomeAssistantAssist(v.baseUrl, v.pipelineId)
+                app.wakeWord.events.collect {
+                    app.voice.startTurn(scope, assistant, app.wakeWord.audioFrames)
+                }
+            }
+        }
+    }
+
+    /**
      * The notification the platform requires of a foreground service. Kept at
      * low importance and silent: on a kiosk with the system bars hidden it is
      * never seen, and it exists to satisfy the platform rather than to tell the
@@ -152,6 +196,9 @@ class KioskService : Service() {
      * service is allowed six hours in any twenty-four, after which the system
      * kills it — and the budget only resets when someone brings the app to the
      * foreground, which on a wall panel never happens.
+     *
+     * `microphone` is added only once RECORD_AUDIO is granted, because claiming
+     * the type without it is refused from API 34.
      */
     private fun startForeground() {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -181,8 +228,14 @@ class KioskService : Service() {
             this,
             NOTIFICATION_ID,
             notification,
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+            foregroundTypes(),
         )
+    }
+
+    private fun foregroundTypes(): Int {
+        var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+        if (app.hasMicPermission()) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        return types
     }
 
     companion object {

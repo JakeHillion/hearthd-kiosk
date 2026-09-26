@@ -18,6 +18,8 @@
     <!-- Only used once the user opts in to wake-word detection. The mic is not
          essential to the kiosk, so a device without one can still install. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- The wake word listens from the service, with the panel dark. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-feature
         android:name="android.hardware.microphone"
         android:required="false" />
@@ -56,7 +58,7 @@
         <service
             android:name=".service.KioskService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse|microphone">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps the wall-panel dashboard polling and its display under control while the screen is off" />

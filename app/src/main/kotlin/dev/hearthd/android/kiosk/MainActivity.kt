@@ -1,7 +1,6 @@
 package dev.hearthd.android.kiosk
 
 import android.Manifest
-import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -17,7 +16,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -38,27 +36,19 @@ import dev.hearthd.android.kiosk.ui.SettingsScreen
 import dev.hearthd.android.kiosk.ui.theme.kioskTypography
 import dev.hearthd.android.kiosk.ui.theme.robotoFlexFamily
 import dev.hearthd.android.kiosk.update.UpdateController
-import dev.hearthd.android.kiosk.voice.HomeAssistantAssist
 import dev.hearthd.android.kiosk.voice.HomeAssistantAuth
-import dev.hearthd.android.kiosk.voice.VoiceController
-import dev.hearthd.android.kiosk.wakeword.WakeWordDetector
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 
 class MainActivity : ComponentActivity() {
-    // Whether RECORD_AUDIO is currently granted. Re-checked in onResume so the
-    // wake-word loop reacts as soon as the operator returns from the permission
-    // dialog or the system settings.
-    private val micPermission = MutableStateFlow(false)
-
+    // The grant lands in onResume, which runs as the dialog closes and is where
+    // both the permission and the service's hold on the mic are refreshed.
     private val requestMic =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            micPermission.value = granted
-        }
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+
+    private val app: KioskApp get() = application as KioskApp
 
     // Latest hearthd control settings, tracked so the light commander always
     // sends to the current URL (or drops the command when unconfigured).
@@ -73,21 +63,18 @@ class MainActivity : ComponentActivity() {
         // operator swipes from an edge, then auto-hide again.
         WindowCompat.setDecorFitsSystemWindows(window, false)
         hideSystemBars()
-        micPermission.value = hasMicPermission()
 
         // Shared with KioskService, which keeps them running while the panel is
         // dark, so they must be the same instances the service drives.
-        val app = application as KioskApp
         val settingsRepo = app.settings
         val dashboard = app.dashboard
         val managed = app.managed
         val snapcast = app.snapcast
         val volumeSync = app.volumeSync
-        KioskService.start(this)
+        val wakeWord = app.wakeWord
+        val voice = app.voice
 
         val controller = UpdateController(applicationContext)
-        val wakeWord = WakeWordDetector(applicationContext)
-        val voice = VoiceController(lifecycleScope)
         // What's playing, read from the same Snapcast server. Demand-driven
         // rather than run from the service like the client and volume sync: it
         // connects only while something on screen is actually showing a track,
@@ -118,38 +105,6 @@ class MainActivity : ComponentActivity() {
                     while (true) {
                         controller.check(settings.channel)
                         delay(settings.intervalMinutes.toLong() * 60_000L)
-                    }
-                }
-            }
-        }
-
-        // The wake-word loop, on the same foreground-only footing as updates:
-        // the mic is opened only while opted in, permitted, and on screen.
-        // collectLatest cancels the listening session (releasing the mic) the
-        // instant settings or the permission change.
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                combine(settingsRepo.wakeWord, micPermission) { s, granted -> s to granted }
-                    .collectLatest { (s, granted) ->
-                        when {
-                            !s.enabled -> wakeWord.markDisabled()
-                            !granted -> wakeWord.markNoPermission()
-                            else -> wakeWord.run(s.model, s.threshold)
-                        }
-                    }
-            }
-        }
-
-        // Voice (Alpha): when enabled + configured, a wake-word detection starts
-        // a Home Assistant turn, streaming the mic frames the detector publishes.
-        // collectLatest rebuilds the assistant when the HA settings change.
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                settingsRepo.voice.collectLatest { v ->
-                    if (!v.enabled || !v.configured) return@collectLatest
-                    val assistant = HomeAssistantAssist(v.baseUrl, v.pipelineId)
-                    wakeWord.events.collect {
-                        voice.startTurn(assistant, wakeWord.audioFrames)
                     }
                 }
             }
@@ -205,7 +160,11 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         // The permission may have changed while we were away (dialog, settings).
-        micPermission.value = hasMicPermission()
+        app.refreshMicPermission()
+        // Started from here rather than onCreate so a fresh mic grant reaches
+        // the service: a foreground service can only take up the microphone
+        // while the app is visible, so this is the moment it can claim it.
+        KioskService.start(this)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -221,10 +180,6 @@ class MainActivity : ComponentActivity() {
             HomeAssistantAuth(OkHttpClient(), settings.baseUrl).accessToken()
             "Connected — Home Assistant authorized this device"
         }.getOrElse { "Failed: ${it.message}" }
-
-    private fun hasMicPermission(): Boolean =
-        ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
-            PackageManager.PERMISSION_GRANTED
 
     private fun hideSystemBars() {
         WindowInsetsControllerCompat(window, window.decorView).apply {
