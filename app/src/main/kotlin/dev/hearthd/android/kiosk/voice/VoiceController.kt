@@ -32,7 +32,7 @@ data class VoiceUiState(
  * until [startTurn]. One turn at a time; a wake word that fires mid-turn (or
  * during the brief post-turn hold) is ignored.
  */
-class VoiceController(private val scope: CoroutineScope) {
+class VoiceController {
 
     private val _ui = MutableStateFlow(VoiceUiState())
     val ui: StateFlow<VoiceUiState> = _ui.asStateFlow()
@@ -44,8 +44,11 @@ class VoiceController(private val scope: CoroutineScope) {
 
     private var turnJob: Job? = null
 
-    /** Run one turn with [assistant], streaming [audio] (16 kHz mono PCM frames). */
-    fun startTurn(assistant: VoiceAssistant, audio: Flow<ShortArray>) {
+    /**
+     * Run one turn with [assistant] in [scope], streaming [audio] (16 kHz mono
+     * PCM frames).
+     */
+    fun startTurn(scope: CoroutineScope, assistant: VoiceAssistant, audio: Flow<ShortArray>) {
         if (turnJob?.isActive == true) return
 
         turnJob = scope.launch {
